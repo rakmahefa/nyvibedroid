@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import android.net.Uri
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -37,6 +38,7 @@ private val AppMuted = Color(0xFF9CAABD)
 
 private enum class AppSection(val label: String, val symbol: String) {
     WORKSPACE("Workspace", "⌂"),
+    GIT("Git", "⑂"),
     BUILDS("Remote Build", "↗")
 }
 
@@ -101,6 +103,10 @@ class MainActivity : ComponentActivity() {
                         Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
                             when (selectedSection) {
                                 AppSection.WORKSPACE -> WorkspaceScreen()
+                                AppSection.GIT -> GitRepositoryScreen { uri ->
+                                    WorkspaceRepository.saveRootUri(this@MainActivity, Uri.parse(uri))
+                                    selectedSection = AppSection.WORKSPACE
+                                }
                                 AppSection.BUILDS -> RemoteBuildScreen()
                             }
                         }
