@@ -45,6 +45,8 @@ internal data class GitRepositoryState(
 internal data class WorkspaceBuildTarget(
     val repository: String,
     val ref: String,
+    val directory: String,
+    val source: String,
     val hasLocalChanges: Boolean,
     val commitsAhead: Int
 )
@@ -110,16 +112,24 @@ internal object GitRepositoryManager {
     fun selectedRepository(context: Context): String? =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(SELECTED_REPOSITORY, null)
 
-    /** Returns a remote build target only when the selected Workspace is a NyVibeDroid-managed Git clone. */
+    /** Resolves the current Workspace first, then the explicit active repository selected in the Git tab. */
     fun currentWorkspaceBuildTarget(context: Context): WorkspaceBuildTarget? {
-        val savedRoot = WorkspaceRepository.loadRootUri(context) ?: return null
-        val uri = Uri.parse(savedRoot)
-        if (uri.scheme != "file") return null
-        val root = runCatching { File(uri.path.orEmpty()).canonicalFile }.getOrNull() ?: return null
-        val projectsRoot = projectsDirectory(context)
-        if (!root.path.startsWith(projectsRoot.path + File.separator) || !File(root, ".git").isDirectory) {
-            return null
+        val savedRoot = WorkspaceRepository.loadRootUri(context)
+        val workspaceRoot = savedRoot?.let { saved ->
+            val uri = Uri.parse(saved)
+            if (uri.scheme != "file") null else runCatching {
+                val candidate = File(uri.path.orEmpty()).canonicalFile
+                val projectsRoot = projectsDirectory(context)
+                candidate.takeIf {
+                    it.path.startsWith(projectsRoot.path + File.separator) && File(it, ".git").isDirectory
+                }
+            }.getOrNull()
         }
+        val selectedGitRoot = selectedRepository(context)?.let { selected ->
+            runCatching { managedRepository(context, selected) }.getOrNull()
+        }
+        val root = workspaceRoot ?: selectedGitRoot ?: return null
+        val source = if (workspaceRoot != null) "Workspace" else "dépôt Git actif"
 
         return try {
             openRepository(root).use { git ->
@@ -143,6 +153,8 @@ internal object GitRepositoryManager {
                 WorkspaceBuildTarget(
                     repository = parts[0] + "/" + parts[1].removeSuffix(".git"),
                     ref = branch,
+                    directory = root.canonicalPath,
+                    source = source,
                     hasLocalChanges = !git.status().call().isClean,
                     commitsAhead = ahead
                 )
