@@ -76,6 +76,9 @@ internal fun GitRepositoryScreen(onOpenInWorkspace: (String) -> Unit) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var infoMessage by remember { mutableStateOf<String?>(null) }
     var branchDraft by rememberSaveable { mutableStateOf("") }
+    val savedIdentity = remember { GitRepositoryManager.loadIdentity(context) }
+    var commitAuthor by rememberSaveable { mutableStateOf(savedIdentity.first) }
+    var commitEmail by rememberSaveable { mutableStateOf(savedIdentity.second) }
     var commitMessage by rememberSaveable { mutableStateOf("") }
     var showCommitDialog by remember { mutableStateOf(false) }
     var diffText by remember { mutableStateOf<String?>(null) }
@@ -382,6 +385,16 @@ internal fun GitRepositoryScreen(onOpenInWorkspace: (String) -> Unit) {
                 Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text("Toutes les modifications locales seront ajoutées à l'index puis commitées.", color = GitMuted, fontSize = 13.sp)
                     OutlinedTextField(
+                        value = commitAuthor, onValueChange = { commitAuthor = it },
+                        label = { Text("Nom pour les commits") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
+                    )
+                    OutlinedTextField(
+                        value = commitEmail, onValueChange = { commitEmail = it },
+                        label = { Text("E-mail de commit") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
+                    )
+                    OutlinedTextField(
                         value = commitMessage, onValueChange = { commitMessage = it },
                         label = { Text("Message du commit") }, minLines = 2,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
@@ -392,9 +405,11 @@ internal fun GitRepositoryScreen(onOpenInWorkspace: (String) -> Unit) {
                 TextButton(onClick = {
                     val path = selectedPath
                     val message = commitMessage
+                    val author = commitAuthor
+                    val email = commitEmail
                     showCommitDialog = false
                     if (path != null) action("Commit") {
-                        withContext(Dispatchers.IO) { GitRepositoryManager.commitAll(context, path, message) }
+                        withContext(Dispatchers.IO) { GitRepositoryManager.commitAll(context, path, message, author, email) }
                         commitMessage = ""
                     }
                 }) { Text("Créer le commit", color = GitAccent, fontWeight = FontWeight.Bold) }
