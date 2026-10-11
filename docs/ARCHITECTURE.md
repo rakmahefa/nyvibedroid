@@ -11,7 +11,7 @@ Keep local file access, editor state, Git repository operations, GitHub Actions 
 - **WorkspaceRepository:** uses Android's Storage Access Framework for arbitrary user-selected folders, and a guarded file-backed path for repositories managed under app-private storage.
 - **GitRepositoryScreen:** repository clone/select controls, status, local branches, diff view, commit form, fetch/pull/push actions.
 - **GitRepositoryManager:** JGit operations for repositories stored below files/projects/. Restricts remote clone URLs to HTTPS on github.com and validates managed working-tree paths.
-- **GitCredentialStore:** AES-GCM encryption backed by Android Keystore for the Git credential, stored separately from the Remote Build token.
+- **GitCredentialStore:** AES-GCM encryption backed by Android Keystore for the Git credential, stored separately from the Remote Build token. The Git screen passes a newly entered token to Fetch/Pull/Push and persists it encrypted before the remote operation.
 - **GitHubBuildClient:** GitHub REST API calls to trigger and poll the Remote Build Engine workflow, discover the build-android artifact, download APKs and read logs.
 - **GitHubTokenStore:** independent AES-GCM storage for the Remote Build token.
 - **Build Engine (rakmahefa/build):** owns Gradle invocation, APK collection, metadata, logs, and artifact publication.
