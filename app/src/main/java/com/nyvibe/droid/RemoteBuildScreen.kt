@@ -113,6 +113,7 @@ internal fun RemoteBuildScreen() {
                             GitHubBuildClient.getArtifactId(savedToken, restored.id)
                         }
                     }.getOrNull()
+                    cleanupWorkspaceUpload(savedToken, restored.id)
                 }
             }.onFailure {
                 message = "Impossible de restaurer le dernier build : " + readableError(it)
@@ -146,6 +147,7 @@ internal fun RemoteBuildScreen() {
                                 (updated.conclusion ?: "inconnu") + " ». Consulte les logs."
                         }
                         messageIsError = updated.conclusion != "success"
+                        cleanupWorkspaceUpload(activeToken, updated.id)
                     }
                 } catch (_: Exception) {
                     // Retain the last known state and try again on the next interval.
@@ -157,6 +159,15 @@ internal fun RemoteBuildScreen() {
     fun showError(error: Throwable) {
         message = readableError(error)
         messageIsError = true
+    }
+
+    suspend fun cleanupWorkspaceUpload(activeToken: String, completedRunId: Long) {
+        val upload = workspaceUpload?.takeIf { it.runId == completedRunId } ?: return
+        withContext(Dispatchers.IO) {
+            GitHubBuildClient.deleteTemporaryWorkspaceUpload(activeToken, upload)
+        }
+        tokenStore.clearWorkspaceUpload()
+        workspaceUpload = null
     }
 
     fun refreshRun() {
@@ -186,6 +197,7 @@ internal fun RemoteBuildScreen() {
                     else -> "La compilation est terminée ; consulte les logs pour connaître la cause."
                 }
                 messageIsError = updated.status == "completed" && updated.conclusion != "success"
+                if (updated.status == "completed") cleanupWorkspaceUpload(activeToken, updated.id)
             } catch (error: Exception) {
                 showError(error)
             } finally {
@@ -287,6 +299,13 @@ internal fun RemoteBuildScreen() {
                     }
                 }
 
+                if (buildSourceMode == "workspace_zip") {
+                    workspaceUpload?.let { upload ->
+                        val linkedUpload = upload.copy(runId = created.id)
+                        tokenStore.saveWorkspaceUpload(linkedUpload)
+                        workspaceUpload = linkedUpload
+                    }
+                }
                 tokenStore.saveRunId(created.id)
                 currentRunId = created.id
                 currentRun = created
