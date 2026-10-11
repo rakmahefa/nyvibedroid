@@ -288,6 +288,36 @@ internal fun WorkspaceScreen() {
                         "L'accès est accordé par le sélecteur Android. L'application ne parcourt pas les autres dossiers.",
                         color = WorkspaceMuted, fontSize = 12.sp
                     )
+                    if (rootUri != null) {
+                        Button(
+                            onClick = { convertWorkspaceToManagedRepository() },
+                            enabled = !isConverting && !isLoading,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = WorkspaceRaised,
+                                contentColor = WorkspaceAccent
+                            )
+                        ) {
+                            if (isConverting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = WorkspaceAccent
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text(
+                                if (isConverting) "Import du workspace…" else "Transformer le workspace actif en dépôt gérable",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text(
+                            "Un dossier choisi via Android sera copié dans l'espace privé de l'application, puis initialisé avec Git. L'original reste intact.",
+                            color = WorkspaceMuted,
+                            fontSize = 11.sp
+                        )
+                    }
                 }
             }
 
