@@ -141,6 +141,31 @@ internal fun GitRepositoryScreen(onOpenInWorkspace: (String) -> Unit) {
         }
     }
 
+    fun remoteAction(label: String, requiresAuthentication: Boolean, operation: suspend (String, String?) -> Unit) {
+        val path = selectedPath
+        if (path == null) {
+            fail(IOException("Sélectionne un dépôt Git avant de lancer cette opération."))
+            return
+        }
+        action(label) {
+            val enteredToken = tokenDraft.trim()
+            val token = enteredToken.ifBlank { GitRepositoryManager.loadCredential(context).orEmpty() }
+            if (requiresAuthentication && token.isBlank()) {
+                throw IOException("Le push GitHub exige une authentification. Saisis un jeton dans la section de connexion Git, puis appuie sur Enregistrer. Le jeton doit avoir Contents: Read and write sur ce dépôt.")
+            }
+            if (enteredToken.isNotBlank()) {
+                withContext(Dispatchers.IO) {
+                    GitRepositoryManager.saveCredential(context, enteredToken)
+                }
+                tokenSaved = true
+                tokenDraft = ""
+            }
+            withContext(Dispatchers.IO) {
+                operation(path, token.takeIf { it.isNotBlank() })
+            }
+        }
+    }
+
     Column(
         modifier = Modifier.fillMaxSize().background(GitCanvas).verticalScroll(rememberScrollState())
             .padding(horizontal = 18.dp, vertical = 16.dp),
@@ -161,7 +186,7 @@ internal fun GitRepositoryScreen(onOpenInWorkspace: (String) -> Unit) {
             )
             OutlinedTextField(
                 value = tokenDraft, onValueChange = { tokenDraft = it }, modifier = Modifier.fillMaxWidth(),
-                singleLine = true, label = { Text("Jeton GitHub (optionnel pour dépôt public)") },
+                singleLine = true, label = { Text("Jeton GitHub (obligatoire pour Push)") },
                 placeholder = { Text(if (tokenSaved) "Jeton enregistré sur cet appareil" else "Jeton avec accès Contents") },
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), enabled = !busy
@@ -192,7 +217,7 @@ internal fun GitRepositoryScreen(onOpenInWorkspace: (String) -> Unit) {
                 ) { Text("Enregistrer", color = GitText) }
             }
             Text(
-                "Le jeton Git est séparé de celui de Remote Build et chiffré avec Android Keystore. Pour push/pull privé, configure Contents: Read and write sur le dépôt.",
+                "Pour Push, saisis ou enregistre un jeton GitHub avec Contents: Read and write et accès au dépôt. Un jeton saisi dans ce champ sera aussi enregistré automatiquement lors d'un Fetch, Pull ou Push réussi. Il reste chiffré séparément avec Android Keystore.",
                 color = GitMuted, fontSize = 12.sp
             )
             if (tokenSaved) {
@@ -296,13 +321,13 @@ internal fun GitRepositoryScreen(onOpenInWorkspace: (String) -> Unit) {
                 Divider(color = GitBorder)
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     GitActionButton("Fetch", !busy) {
-                        action("Fetch") { withContext(Dispatchers.IO) { GitRepositoryManager.fetch(context, selectedPath!!, GitRepositoryManager.loadCredential(context)) } }
+                        remoteAction("Fetch", false) { path, token -> GitRepositoryManager.fetch(context, path, token) }
                     }
                     GitActionButton("Pull", !busy) {
-                        action("Pull") { withContext(Dispatchers.IO) { GitRepositoryManager.pull(context, selectedPath!!, GitRepositoryManager.loadCredential(context)) } }
+                        remoteAction("Pull", false) { path, token -> GitRepositoryManager.pull(context, path, token) }
                     }
                     GitActionButton("Push", !busy) {
-                        action("Push") { withContext(Dispatchers.IO) { GitRepositoryManager.push(context, selectedPath!!, GitRepositoryManager.loadCredential(context)) } }
+                        remoteAction("Push", true) { path, token -> GitRepositoryManager.push(context, path, token) }
                     }
                 }
             }
