@@ -13,7 +13,8 @@ NyVibeDroid is an Android development workspace built around local project files
 - Choose a folder with Android's system folder picker and retain read/write access.
 - Browse folders and files, create text files, edit common source/project files, save changes, or discard them.
 - Edit UTF-8 text up to 1 MiB. Binary or unrecognized file types are not opened.
-- Open a repository cloned through the Git section in the same Workspace editor.
+- Tap **Transform active Workspace into a managed repository** to import a SAF folder into app-private storage and initialize local Git. The original SAF folder stays untouched; after import, edits apply to the managed copy.
+- Open a repository cloned or imported through the Git section in the same Workspace editor.
 
 This is a lightweight first editor, not yet a full IDE. Syntax highlighting, tabs, search, undo/redo, and project-wide indexing remain future improvements.
 
