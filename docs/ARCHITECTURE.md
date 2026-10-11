@@ -9,15 +9,17 @@ Keep local file access, editor state, Git repository operations, GitHub Actions 
 - **Navigation:** Jetpack Compose sections for Workspace, Git, and Remote Build.
 - **WorkspaceScreen:** scoped folder browsing, file list, text editor, create/save/discard actions, and error states.
 - **WorkspaceRepository:** uses Android's Storage Access Framework for arbitrary user-selected folders, and a guarded file-backed path for repositories managed under app-private storage.
-- **GitRepositoryScreen:** repository clone/select controls, status, local branches, diff view, commit form, fetch/pull/push actions.
+- **GitRepositoryScreen:** repository clone/select controls, status, local branches, diff view, commit form, fetch/pull/push actions, and an explicit action to set the selected repository as the active Workspace.
 - **GitRepositoryManager:** JGit operations for repositories stored below files/projects/. Restricts remote clone URLs to HTTPS on github.com and validates managed working-tree paths.
-- **GitCredentialStore:** AES-GCM encryption backed by Android Keystore for the Git credential, stored separately from the Remote Build token.
+- **GitCredentialStore:** AES-GCM encryption backed by Android Keystore for the Git credential, stored separately from the Remote Build token. The Git screen passes a newly entered token to Fetch/Pull/Push and persists it encrypted before the remote operation.
 - **GitHubBuildClient:** GitHub REST API calls to trigger and poll the Remote Build Engine workflow, discover the build-android artifact, download APKs and read logs.
 - **GitHubTokenStore:** independent AES-GCM storage for the Remote Build token.
 - **Build Engine (rakmahefa/build):** owns Gradle invocation, APK collection, metadata, logs, and artifact publication.
 - **Planned AI layer:** local model integration with explicit access to selected files.
 
 ## Workspace access and editor
+
+The Workspace screen can import an Android SAF-selected folder into app-private `files/projects/workspaces/` storage and initialize it as a local JGit repository. The selected source folder is copied, not modified. Once imported, Workspace switches to the managed copy; Git and Workspace then operate on the same files.
 
 1. User may select an arbitrary folder with Android's document-tree picker; NyVibeDroid keeps the granted URI.
 2. For app-managed Git clones, the workspace root is a file URI created by the Git manager and checked to be inside files/projects/.
@@ -41,11 +43,12 @@ The first implementation intentionally does not implement SSH, alternate Git hos
 
 ## Remote build flow
 
-1. User supplies target repository (owner/name) and branch/tag/commit.
-2. App validates the Remote Build token and dispatches workflow_dispatch to rakmahefa/build.
-3. App locates the new run, records its ID, and polls GitHub Actions.
-4. When the run completes, the app discovers the build-android artifact.
-5. User opens bounded log excerpts or downloads the debug APK to Downloads.
+1. User chooses **Workspace ZIP** to build the active local Workspace, or **Branche GitHub** to build a remote repository/ref.
+2. For ZIP mode, the app streams workspace files into a bounded archive, excluding Git metadata, common generated caches, and known local secret/config files. It uploads the archive as an asset on a temporary private draft release in `rakmahefa/build`.
+3. App dispatches `remote-build.yml` with the source mode and, for ZIP mode, the temporary release ID. The Build Engine safely validates and extracts the archive into `target/` before using the same Android Gradle builder.
+4. App locates the new run, records its ID, and polls GitHub Actions.
+5. When the run completes, the app discovers the build-android artifact, removes the temporary release and tag, and makes logs/APKs available for download.
+6. A scheduled Build Engine workflow deletes abandoned workspace upload releases older than 24 hours.
 
 The Remote Build token is only for the GitHub Actions API and is not forwarded to the target build process. Private build targets require a separate read-only BUILD_TARGET_TOKEN Actions secret in the Build Engine repository.
 

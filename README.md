@@ -13,7 +13,8 @@ NyVibeDroid is an Android development workspace built around local project files
 - Choose a folder with Android's system folder picker and retain read/write access.
 - Browse folders and files, create text files, edit common source/project files, save changes, or discard them.
 - Edit UTF-8 text up to 1 MiB. Binary or unrecognized file types are not opened.
-- Open a repository cloned through the Git section in the same Workspace editor.
+- Tap **Transform active Workspace into a managed repository** to import a SAF folder into app-private storage and initialize local Git. The original SAF folder stays untouched; after import, edits apply to the managed copy.
+- Open a repository cloned or imported through the Git section in the same Workspace editor.
 
 This is a lightweight first editor, not yet a full IDE. Syntax highlighting, tabs, search, undo/redo, and project-wide indexing remain future improvements.
 
@@ -35,7 +36,7 @@ To clone a repository, enter owner/repository or an HTTPS GitHub URL. The first 
 
 #### GitHub permissions and credentials
 
-The Git section stores its credential separately from the Remote Build token and encrypts it with Android Keystore. Public repositories can be cloned without a token. Private clone/fetch requires a token with repository Contents: read access; pushing to a repository requires Contents: read and write. Use a fine-grained personal access token limited to the repositories you trust and never share it.
+The Git section stores its credential separately from the Remote Build token and encrypts it with Android Keystore. Public repositories can be cloned without a token. Private clone/fetch requires a token with repository Contents: read access; pushing to a repository requires Contents: read and write. If a token is typed into the Git screen, the next Fetch/Pull/Push action uses it and saves it encrypted on-device. A Push without a saved or entered token is stopped with a clear authentication message. Use a fine-grained personal access token limited to the repositories you trust and never share it.
 
 The Remote Build screen uses a separate token for Actions access to rakmahefa/build. These credentials have distinct storage and purposes.
 
@@ -45,10 +46,12 @@ Git protects against invalid repository URLs and only clones from https://github
 
 The **Remote Build** screen triggers the companion Build Engine, tracks a workflow, displays build logs, and downloads the debug APK directly to the phone.
 
-1. Create a fine-grained GitHub personal access token for the rakmahefa/build repository. Grant Actions: Read and write.
+1. Create a fine-grained GitHub personal access token for `rakmahefa/build`. Grant **Actions: Read and write**. **Workspace ZIP** also needs **Contents: Read and write** on `rakmahefa/build` so the app can upload and delete a temporary private draft release.
 2. Enter the token in NyVibeDroid and select **Connecter**. The app validates it and encrypts it with Android Keystore.
-3. Enter a target repository in owner/name format and a branch, tag, or commit.
+3. Choose **Workspace ZIP** to compile the active Workspace exactly as it exists on the phone, without committing or pushing it to a Git branch. Or choose **Branche GitHub** to build a remote repository/ref.
 4. Start the compilation, then open its logs or download the debug APK to Downloads/NyVibeDroid.
+
+The ZIP archive excludes `.git`, common build/cache directories, `local.properties`, local `.env` files (except examples), and common private-key file types. Source content is limited to 512 MiB and the compressed ZIP to 200 MiB. It is uploaded as a temporary private draft release asset in the Build Engine repository; the app removes that release after the workflow finishes, and a scheduled workflow cleans up abandoned uploads after 24 hours. Review your project files before uploading.
 
 The active build refreshes while the screen is open and the last run is remembered across app restarts. The owner has manually verified the end-to-end flow: connection, project compilation, and APK download.
 

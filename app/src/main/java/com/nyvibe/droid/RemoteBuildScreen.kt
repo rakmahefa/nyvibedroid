@@ -80,6 +80,9 @@ internal fun RemoteBuildScreen() {
     var connected by remember { mutableStateOf(token != null) }
     var repository by rememberSaveable { mutableStateOf("rakmahefa/nyvibedroid") }
     var targetRef by rememberSaveable { mutableStateOf("main") }
+    var buildSourceMode by rememberSaveable { mutableStateOf("workspace_zip") }
+    var workspaceUpload by remember { mutableStateOf(tokenStore.loadWorkspaceUpload()) }
+    var workspaceTarget by remember { mutableStateOf<WorkspaceBuildTarget?>(null) }
     var currentRunId by remember { mutableStateOf(tokenStore.loadRunId()) }
     var currentRun by remember { mutableStateOf<BuildRun?>(null) }
     var artifactId by remember { mutableStateOf<Long?>(null) }
@@ -89,6 +92,21 @@ internal fun RemoteBuildScreen() {
     var messageIsError by remember { mutableStateOf(false) }
     var logText by remember { mutableStateOf<String?>(null) }
     var showLogs by remember { mutableStateOf(false) }
+
+    suspend fun cleanupWorkspaceUpload(activeToken: String, completedRunId: Long) {
+        val upload = workspaceUpload?.takeIf { it.runId == completedRunId } ?: return
+        withContext(Dispatchers.IO) {
+            GitHubBuildClient.deleteTemporaryWorkspaceUpload(activeToken, upload)
+        }
+        tokenStore.clearWorkspaceUpload()
+        workspaceUpload = null
+    }
+
+    LaunchedEffect(Unit) {
+        workspaceTarget = withContext(Dispatchers.IO) {
+            GitRepositoryManager.currentWorkspaceBuildTarget(context)
+        }
+    }
 
     LaunchedEffect(token, currentRunId) {
         val savedToken = token
@@ -104,6 +122,7 @@ internal fun RemoteBuildScreen() {
                             GitHubBuildClient.getArtifactId(savedToken, restored.id)
                         }
                     }.getOrNull()
+                    cleanupWorkspaceUpload(savedToken, restored.id)
                 }
             }.onFailure {
                 message = "Impossible de restaurer le dernier build : " + readableError(it)
@@ -137,6 +156,7 @@ internal fun RemoteBuildScreen() {
                                 (updated.conclusion ?: "inconnu") + " ». Consulte les logs."
                         }
                         messageIsError = updated.conclusion != "success"
+                        cleanupWorkspaceUpload(activeToken, updated.id)
                     }
                 } catch (_: Exception) {
                     // Retain the last known state and try again on the next interval.
@@ -177,6 +197,7 @@ internal fun RemoteBuildScreen() {
                     else -> "La compilation est terminée ; consulte les logs pour connaître la cause."
                 }
                 messageIsError = updated.status == "completed" && updated.conclusion != "success"
+                if (updated.status == "completed") cleanupWorkspaceUpload(activeToken, updated.id)
             } catch (error: Exception) {
                 showError(error)
             } finally {
@@ -221,20 +242,26 @@ internal fun RemoteBuildScreen() {
             messageIsError = true
             return
         }
-        if (!repository.matches(Regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))) {
-            message = "Le dépôt doit être au format propriétaire/dépôt."
-            messageIsError = true
-            return
-        }
-        if (targetRef.isBlank()) {
-            message = "La branche, le tag ou le commit est obligatoire."
+        if (buildSourceMode == "github_ref") {
+            if (!repository.matches(Regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))) {
+                message = "Le dépôt doit être au format propriétaire/dépôt."
+                messageIsError = true
+                return
+            }
+            if (targetRef.isBlank()) {
+                message = "La branche, le tag ou le commit est obligatoire."
+                messageIsError = true
+                return
+            }
+        } else if (WorkspaceRepository.loadRootUri(context).isNullOrBlank()) {
+            message = "Choisis d'abord un dossier dans l'onglet Workspace."
             messageIsError = true
             return
         }
 
         scope.launch {
             busy = true
-            busyLabel = "Envoi de la demande…"
+            busyLabel = "Vérification du jeton…"
             message = null
             try {
                 withContext(Dispatchers.IO) { GitHubBuildClient.validateToken(candidate) }
@@ -242,15 +269,52 @@ internal fun RemoteBuildScreen() {
                 token = candidate
                 connected = true
                 tokenDraft = ""
-                busyLabel = "Démarrage du workflow GitHub…"
-                val created = withContext(Dispatchers.IO) {
-                    GitHubBuildClient.dispatchBuild(candidate, repository.trim(), targetRef.trim())
+
+                val created = if (buildSourceMode == "workspace_zip") {
+                    busyLabel = "Compression du workspace…"
+                    val archive = withContext(Dispatchers.IO) {
+                        WorkspaceRepository.createWorkspaceArchive(
+                            context,
+                            File(context.cacheDir, "nyvibedroid-workspace-" + System.currentTimeMillis() + ".zip")
+                        )
+                    }
+                    val upload = try {
+                        busyLabel = "Téléversement du ZIP privé…"
+                        withContext(Dispatchers.IO) {
+                            GitHubBuildClient.uploadWorkspaceArchive(candidate, archive)
+                        }
+                    } finally {
+                        archive.delete()
+                    }
+                    tokenStore.saveWorkspaceUpload(upload)
+                    workspaceUpload = upload
+                    busyLabel = "Démarrage du build distant…"
+                    withContext(Dispatchers.IO) {
+                        GitHubBuildClient.dispatchWorkspaceArchiveBuild(candidate, upload.id)
+                    }
+                } else {
+                    busyLabel = "Démarrage du workflow GitHub…"
+                    withContext(Dispatchers.IO) {
+                        GitHubBuildClient.dispatchBuild(candidate, repository.trim(), targetRef.trim())
+                    }
+                }
+
+                if (buildSourceMode == "workspace_zip") {
+                    workspaceUpload?.let { upload ->
+                        val linkedUpload = upload.copy(runId = created.id)
+                        tokenStore.saveWorkspaceUpload(linkedUpload)
+                        workspaceUpload = linkedUpload
+                    }
                 }
                 tokenStore.saveRunId(created.id)
                 currentRunId = created.id
                 currentRun = created
                 artifactId = null
-                message = "Demande envoyée à Build Engine pour " + repository.trim() + " · " + targetRef.trim() + "."
+                message = if (buildSourceMode == "workspace_zip") {
+                    "Workspace envoyé en ZIP privé. Compilation demandée sans push de branche. Les APK et logs seront disponibles à la fin."
+                } else {
+                    "Demande envoyée à Build Engine pour " + repository.trim() + " · " + targetRef.trim() + "."
+                }
                 messageIsError = false
             } catch (error: Exception) {
                 showError(error)
@@ -363,7 +427,7 @@ internal fun RemoteBuildScreen() {
             ) {
                 SectionTitle(number = "01", title = "Connexion GitHub", trailing = if (connected) "CONNECTÉ" else "REQUIS")
                 Text(
-                    "Jeton personnel avec la permission Actions : Read and write sur le dépôt rakmahefa/build.",
+                    "Mode branche : Actions Read and write sur rakmahefa/build. Mode Workspace ZIP : Actions Read and write + Contents Read and write sur rakmahefa/build pour envoyer puis supprimer l’archive temporaire.",
                     color = Muted,
                     fontSize = 13.sp
                 )
@@ -423,25 +487,126 @@ internal fun RemoteBuildScreen() {
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 SectionTitle(number = "02", title = "Projet cible", trailing = "ANDROID")
-                OutlinedTextField(
-                    value = repository,
-                    onValueChange = { repository = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Dépôt GitHub") },
-                    placeholder = { Text("propriétaire/nom-du-dépôt") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                    enabled = !busy
-                )
-                OutlinedTextField(
-                    value = targetRef,
-                    onValueChange = { targetRef = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Branche, tag ou commit") },
-                    placeholder = { Text("main") },
-                    singleLine = true,
-                    enabled = !busy
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = { buildSourceMode = "workspace_zip" },
+                        enabled = !busy,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(11.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (buildSourceMode == "workspace_zip") Accent else PanelRaised,
+                            contentColor = if (buildSourceMode == "workspace_zip") Canvas else Foreground
+                        )
+                    ) {
+                        Text("Workspace ZIP", fontWeight = FontWeight.Bold)
+                    }
+                    OutlinedButton(
+                        onClick = { buildSourceMode = "github_ref" },
+                        enabled = !busy,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(11.dp)
+                    ) {
+                        Text("Branche GitHub", color = if (buildSourceMode == "github_ref") Accent else Foreground)
+                    }
+                }
+
+                if (buildSourceMode == "workspace_zip") {
+                    val activeWorkspaceUri = WorkspaceRepository.loadRootUri(context)
+                    Surface(
+                        color = PanelRaised,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(7.dp)
+                        ) {
+                            Text(
+                                if (activeWorkspaceUri.isNullOrBlank()) "Aucun workspace sélectionné" else "Workspace prêt à envoyer",
+                                color = if (activeWorkspaceUri.isNullOrBlank()) Danger else Accent,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                if (activeWorkspaceUri.isNullOrBlank()) {
+                                    "Ouvre l'onglet Workspace et choisis le dossier du projet. Reviens ici ensuite."
+                                } else {
+                                    "Le dossier actif sera compressé en ZIP puis envoyé à Build Engine. Pas besoin de créer une branche ni de pousser tes changements."
+                                },
+                                color = Muted,
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                "Les métadonnées .git, caches de build, local.properties, fichiers .env locaux et clés privées sont exclus. Limites : 512 Mio de sources, 200 Mio d'archive.",
+                                color = Muted,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = repository,
+                        onValueChange = { repository = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Dépôt GitHub") },
+                        placeholder = { Text("propriétaire/nom-du-dépôt") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                        enabled = !busy
+                    )
+                    OutlinedTextField(
+                        value = targetRef,
+                        onValueChange = { targetRef = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Branche, tag ou commit") },
+                        placeholder = { Text("main") },
+                        singleLine = true,
+                        enabled = !busy
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                busy = true
+                                busyLabel = "Lecture du dépôt Git…"
+                                try {
+                                    val target = withContext(Dispatchers.IO) {
+                                        GitRepositoryManager.currentWorkspaceBuildTarget(context)
+                                    }
+                                    workspaceTarget = target
+                                    if (target == null) {
+                                        message = "Aucun workspace ou dépôt Git actif disponible. Dans l'onglet Git, clone ou sélectionne un dépôt, puis choisis « Définir comme Workspace actif et ouvrir »."
+                                        messageIsError = true
+                                    } else {
+                                        repository = target.repository
+                                        targetRef = target.ref
+                                        message = "Cible sélectionnée : " + target.repository + " · " + target.ref + "."
+                                        messageIsError = false
+                                    }
+                                } catch (error: Exception) {
+                                    showError(error)
+                                } finally {
+                                    busy = false
+                                    busyLabel = ""
+                                }
+                            }
+                        },
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Utiliser le dépôt Git actif", color = Foreground)
+                    }
+                    val selectedWorkspaceTarget = workspaceTarget?.takeIf {
+                        repository.equals(it.repository, ignoreCase = true) && targetRef == it.ref
+                    }
+                    if (selectedWorkspaceTarget != null) {
+                        Text(
+                            "Mode branche : Build Engine récupère le code depuis GitHub. Les fichiers locaux non poussés ne sont pas envoyés.",
+                            color = if (selectedWorkspaceTarget.hasLocalChanges || selectedWorkspaceTarget.commitsAhead > 0) Danger else Muted,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
                 Surface(
                     color = PanelRaised,
                     shape = RoundedCornerShape(12.dp),

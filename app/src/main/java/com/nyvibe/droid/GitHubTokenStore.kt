@@ -52,6 +52,26 @@ internal class GitHubTokenStore(context: Context) {
     fun loadRunId(): Long? =
         preferences.getLong(KEY_RUN_ID, -1L).takeIf { it > 0L }
 
+    fun saveWorkspaceUpload(upload: WorkspaceUploadRelease) {
+        preferences.edit()
+            .putLong(KEY_WORKSPACE_RELEASE_ID, upload.id)
+            .putString(KEY_WORKSPACE_RELEASE_TAG, upload.tagName)
+            .putLong(KEY_WORKSPACE_RUN_ID, upload.runId ?: -1L)
+            .apply()
+    }
+
+    fun loadWorkspaceUpload(): WorkspaceUploadRelease? {
+        val id = preferences.getLong(KEY_WORKSPACE_RELEASE_ID, -1L)
+        val tag = preferences.getString(KEY_WORKSPACE_RELEASE_TAG, null)
+        val runId = preferences.getLong(KEY_WORKSPACE_RUN_ID, -1L).takeIf { it > 0L }
+        return if (id > 0L && !tag.isNullOrBlank()) WorkspaceUploadRelease(id, tag, runId) else null
+    }
+
+    fun clearWorkspaceUpload() {
+        preferences.edit().remove(KEY_WORKSPACE_RELEASE_ID).remove(KEY_WORKSPACE_RELEASE_TAG).remove(KEY_WORKSPACE_RUN_ID).apply()
+    }
+
+
     private fun getOrCreateKey(): SecretKey {
         val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         val existing = keyStore.getKey(KEY_ALIAS, null) as? SecretKey
@@ -76,5 +96,8 @@ internal class GitHubTokenStore(context: Context) {
         const val KEY_IV = "token_iv"
         const val KEY_CIPHERTEXT = "token_ciphertext"
         const val KEY_RUN_ID = "last_run_id"
+        const val KEY_WORKSPACE_RELEASE_ID = "workspace_release_id"
+        const val KEY_WORKSPACE_RELEASE_TAG = "workspace_release_tag"
+        const val KEY_WORKSPACE_RUN_ID = "workspace_run_id"
     }
 }

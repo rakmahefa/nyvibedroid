@@ -6,7 +6,9 @@ import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.time.OffsetDateTime
+import java.util.UUID
 import java.util.zip.ZipFile
 
 internal data class BuildRun(
@@ -19,6 +21,12 @@ internal data class BuildRun(
     val createdAt: String
 )
 
+internal data class WorkspaceUploadRelease(
+    val id: Long,
+    val tagName: String,
+    val runId: Long? = null
+)
+
 internal object GitHubBuildClient {
     private const val API = "https://api.github.com"
     private const val ENGINE_REPOSITORY = "rakmahefa/build"
@@ -29,6 +37,109 @@ internal object GitHubBuildClient {
         val repository = requestJson(token, "/repos/$ENGINE_REPOSITORY", "GET").optString("full_name")
         if (!repository.equals(ENGINE_REPOSITORY, ignoreCase = true)) {
             throw IOException("Le dépôt Build Engine est inaccessible avec ce jeton.")
+        }
+    }
+
+    /**
+     * Uploads the active Workspace ZIP as a temporary draft release asset in the Build Engine repo.
+     * The token needs Contents: write and Actions: write on rakmahefa/build.
+     */
+    fun uploadWorkspaceArchive(token: String, archive: File): WorkspaceUploadRelease {
+        if (!archive.isFile || archive.length() <= 0L) throw IOException("L'archive du workspace est vide.")
+        if (archive.length() > 200L * 1024L * 1024L) {
+            throw IOException("L'archive dépasse la limite de 200 Mio pour l'envoi.")
+        }
+        val tag = "nyvibe-workspace-" + UUID.randomUUID().toString().replace("-", "")
+        val payload = JSONObject()
+            .put("tag_name", tag)
+            .put("name", "NyVibeDroid temporary workspace upload")
+            .put("body", "Temporary private workspace archive. Managed by NyVibeDroid; safe to delete after the remote build.")
+            .put("draft", true)
+            .put("prerelease", true)
+        val response = requestJson(token, "/repos/" + ENGINE_REPOSITORY + "/releases", "POST", payload.toString())
+        val releaseId = response.optLong("id")
+        val uploadUrl = response.optString("upload_url").substringBefore("{")
+        if (releaseId <= 0L || !uploadUrl.startsWith("https://uploads.github.com/")) {
+            throw IOException("GitHub a créé une version temporaire, mais n'a pas retourné une URL d'envoi valide.")
+        }
+        val release = WorkspaceUploadRelease(releaseId, tag)
+        try {
+            uploadReleaseAsset(token, uploadUrl, archive)
+            return release
+        } catch (error: Exception) {
+            runCatching { deleteTemporaryWorkspaceUpload(token, release) }
+            throw error
+        }
+    }
+
+    fun dispatchWorkspaceArchiveBuild(token: String, releaseId: Long): BuildRun {
+        require(releaseId > 0L) { "Identifiant d'archive temporaire invalide." }
+        val existingRunIds = listRuns(token).mapTo(mutableSetOf()) { it.id }
+        val dispatchedAt = System.currentTimeMillis()
+        val body = JSONObject()
+            .put("ref", "main")
+            .put(
+                "inputs",
+                JSONObject()
+                    .put("source_mode", "workspace_archive")
+                    .put("archive_release_id", releaseId.toString())
+                    .put("platform", "android")
+            )
+        request(token, "/repos/" + ENGINE_REPOSITORY + "/actions/workflows/" + WORKFLOW + "/dispatches", "POST", body.toString())
+
+        repeat(18) {
+            Thread.sleep(1_500)
+            val run = listRuns(token).firstOrNull {
+                it.id !in existingRunIds && parseTimestamp(it.createdAt) >= dispatchedAt - 5_000L
+            }
+            if (run != null) return run
+        }
+        throw IOException(
+            "GitHub a accepté la compilation du workspace, mais l'exécution n'est pas encore visible. " +
+                "Actualise dans quelques secondes ; ne renvoie pas immédiatement l'archive."
+        )
+    }
+
+    fun deleteTemporaryWorkspaceUpload(token: String, upload: WorkspaceUploadRelease) {
+        runCatching { request(token, "/repos/" + ENGINE_REPOSITORY + "/releases/" + upload.id, "DELETE") }
+        runCatching { request(token, "/repos/" + ENGINE_REPOSITORY + "/git/refs/tags/" + upload.tagName, "DELETE") }
+    }
+
+    private fun uploadReleaseAsset(token: String, baseUploadUrl: String, archive: File) {
+        val encodedName = URLEncoder.encode("workspace.zip", "UTF-8")
+        val endpoint = baseUploadUrl + "?name=" + encodedName
+        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            instanceFollowRedirects = false
+            connectTimeout = 30_000
+            readTimeout = 300_000
+            setFixedLengthStreamingMode(archive.length())
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("Authorization", "Bearer " + token)
+            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+            setRequestProperty("User-Agent", "NyVibeDroid")
+            setRequestProperty("Content-Type", "application/zip")
+        }
+        try {
+            archive.inputStream().buffered().use { input ->
+                connection.outputStream.buffered().use { output -> input.copyTo(output) }
+            }
+            val status = connection.responseCode
+            val detail = runCatching {
+                val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+                stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            }.getOrDefault("")
+            if (status !in 200..299) {
+                val explanation = apiMessage(detail).ifBlank {
+                    if (status == 403 || status == 404) {
+                        "Vérifie les droits Contents: Read and write sur rakmahefa/build."
+                    } else "GitHub a refusé l'envoi de l'archive."
+                }
+                throw IOException("Envoi de l'archive refusé (HTTP " + status + ") : " + explanation)
+            }
+        } finally {
+            connection.disconnect()
         }
     }
 
@@ -46,6 +157,7 @@ internal object GitHubBuildClient {
             .put(
                 "inputs",
                 JSONObject()
+                    .put("source_mode", "repository")
                     .put("repository", targetRepository)
                     .put("branch", targetRef.trim())
                     .put("platform", "android")
@@ -206,8 +318,8 @@ internal object GitHubBuildClient {
         }
     }
 
-    private fun requestJson(token: String, path: String, method: String): JSONObject {
-        val response = request(token, path, method)
+    private fun requestJson(token: String, path: String, method: String, body: String? = null): JSONObject {
+        val response = request(token, path, method, body)
         return if (response.isBlank()) JSONObject() else JSONObject(response)
     }
 
@@ -244,7 +356,7 @@ internal object GitHubBuildClient {
                 val explanation = apiMessage(responseBody).ifBlank {
                     when (status) {
                         401 -> "Jeton GitHub invalide ou expiré."
-                        403 -> "Accès refusé. Vérifie les permissions Actions du jeton."
+                        403 -> "Accès refusé. Vérifie les permissions Actions: Read and write et, pour le build ZIP, Contents: Read and write sur rakmahefa/build."
                         404 -> "Workflow ou dépôt introuvable, ou jeton sans accès."
                         else -> "La requête GitHub a échoué."
                     }
