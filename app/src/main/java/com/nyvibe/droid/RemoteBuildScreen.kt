@@ -487,86 +487,125 @@ internal fun RemoteBuildScreen() {
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 SectionTitle(number = "02", title = "Projet cible", trailing = "ANDROID")
-                OutlinedTextField(
-                    value = repository,
-                    onValueChange = { repository = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Dépôt GitHub") },
-                    placeholder = { Text("propriétaire/nom-du-dépôt") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                    enabled = !busy
-                )
-                OutlinedTextField(
-                    value = targetRef,
-                    onValueChange = { targetRef = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Branche, tag ou commit") },
-                    placeholder = { Text("main") },
-                    singleLine = true,
-                    enabled = !busy
-                )
-                OutlinedButton(
-                    onClick = {
-                        scope.launch {
-                            busy = true
-                            busyLabel = "Lecture du workspace…"
-                            try {
-                                val target = withContext(Dispatchers.IO) {
-                                    GitRepositoryManager.currentWorkspaceBuildTarget(context)
-                                }
-                                workspaceTarget = target
-                                if (target == null) {
-                                    message = "Aucun workspace Git géré ni dépôt Git actif disponible. Dans l'onglet Git, clone ou sélectionne un dépôt GitHub, puis utilise « Définir comme Workspace actif et ouvrir »."
-                                    messageIsError = true
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = { buildSourceMode = "workspace_zip" },
+                        enabled = !busy,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(11.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (buildSourceMode == "workspace_zip") Accent else PanelRaised,
+                            contentColor = if (buildSourceMode == "workspace_zip") Canvas else Foreground
+                        )
+                    ) {
+                        Text("Workspace ZIP", fontWeight = FontWeight.Bold)
+                    }
+                    OutlinedButton(
+                        onClick = { buildSourceMode = "github_ref" },
+                        enabled = !busy,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(11.dp)
+                    ) {
+                        Text("Branche GitHub", color = if (buildSourceMode == "github_ref") Accent else Foreground)
+                    }
+                }
+
+                if (buildSourceMode == "workspace_zip") {
+                    val activeWorkspaceUri = WorkspaceRepository.loadRootUri(context)
+                    Surface(
+                        color = PanelRaised,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(7.dp)
+                        ) {
+                            Text(
+                                if (activeWorkspaceUri.isNullOrBlank()) "Aucun workspace sélectionné" else "Workspace prêt à envoyer",
+                                color = if (activeWorkspaceUri.isNullOrBlank()) Danger else Accent,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                if (activeWorkspaceUri.isNullOrBlank()) {
+                                    "Ouvre l'onglet Workspace et choisis le dossier du projet. Reviens ici ensuite."
                                 } else {
-                                    repository = target.repository
-                                    targetRef = target.ref
-                                    message = if (target.source == "Workspace") {
-                                        "Workspace sélectionné : " + target.repository + " · " + target.ref + "."
-                                    } else {
-                                        "Aucun workspace Git géré trouvé. Utilisation du dépôt Git actif : " + target.repository + " · " + target.ref + "."
+                                    "Le dossier actif sera compressé en ZIP puis envoyé à Build Engine. Pas besoin de créer une branche ni de pousser tes changements."
+                                },
+                                color = Muted,
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                "Les métadonnées .git, caches de build, local.properties, fichiers .env locaux et clés privées sont exclus. Limites : 512 Mio de sources, 200 Mio d'archive.",
+                                color = Muted,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = repository,
+                        onValueChange = { repository = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Dépôt GitHub") },
+                        placeholder = { Text("propriétaire/nom-du-dépôt") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                        enabled = !busy
+                    )
+                    OutlinedTextField(
+                        value = targetRef,
+                        onValueChange = { targetRef = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Branche, tag ou commit") },
+                        placeholder = { Text("main") },
+                        singleLine = true,
+                        enabled = !busy
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                busy = true
+                                busyLabel = "Lecture du dépôt Git…"
+                                try {
+                                    val target = withContext(Dispatchers.IO) {
+                                        GitRepositoryManager.currentWorkspaceBuildTarget(context)
                                     }
-                                    messageIsError = false
+                                    workspaceTarget = target
+                                    if (target == null) {
+                                        message = "Aucun workspace ou dépôt Git actif disponible. Dans l'onglet Git, clone ou sélectionne un dépôt, puis choisis « Définir comme Workspace actif et ouvrir »."
+                                        messageIsError = true
+                                    } else {
+                                        repository = target.repository
+                                        targetRef = target.ref
+                                        message = "Cible sélectionnée : " + target.repository + " · " + target.ref + "."
+                                        messageIsError = false
+                                    }
+                                } catch (error: Exception) {
+                                    showError(error)
+                                } finally {
+                                    busy = false
+                                    busyLabel = ""
                                 }
-                            } catch (error: Exception) {
-                                showError(error)
-                            } finally {
-                                busy = false
-                                busyLabel = ""
                             }
-                        }
-                    },
-                    enabled = !busy,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("Utiliser le workspace / dépôt Git actif", color = Foreground)
-                }
-                val selectedWorkspaceTarget = workspaceTarget?.takeIf {
-                    repository.equals(it.repository, ignoreCase = true) && targetRef == it.ref
-                }
-                if (selectedWorkspaceTarget != null) {
-                    val hasUnsyncedCode = selectedWorkspaceTarget.hasLocalChanges || selectedWorkspaceTarget.commitsAhead > 0
-                    Text(
-                        if (hasUnsyncedCode) {
-                            "Modifications locales ou commits non poussés détectés. Remote Build compile la copie GitHub : fais Commit puis Push dans Git avant de lancer le build pour inclure ces changements."
-                        } else {
-                            if (selectedWorkspaceTarget.source == "Workspace") {
-                            "Workspace Git lié. Remote Build compile la branche distante sur GitHub ; les fichiers locaux non committés ne sont pas transférés."
-                        } else {
-                            "Cible prise depuis le dépôt actif de l'onglet Git. Remote Build compile sa branche distante sur GitHub ; les changements locaux doivent être commités et poussés."
-                        }
                         },
-                        color = if (hasUnsyncedCode) Danger else Muted,
-                        fontSize = 12.sp
-                    )
-                } else if (workspaceTarget == null) {
-                    Text(
-                        "Aucun dépôt Git compatible n'a été trouvé. Dans l'onglet Git, clone un dépôt GitHub ou sélectionne un dépôt déjà cloné, puis utilise « Définir comme Workspace actif ».",
-                        color = Muted,
-                        fontSize = 12.sp
-                    )
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Utiliser le dépôt Git actif", color = Foreground)
+                    }
+                    val selectedWorkspaceTarget = workspaceTarget?.takeIf {
+                        repository.equals(it.repository, ignoreCase = true) && targetRef == it.ref
+                    }
+                    if (selectedWorkspaceTarget != null) {
+                        Text(
+                            "Mode branche : Build Engine récupère le code depuis GitHub. Les fichiers locaux non poussés ne sont pas envoyés.",
+                            color = if (selectedWorkspaceTarget.hasLocalChanges || selectedWorkspaceTarget.commitsAhead > 0) Danger else Muted,
+                            fontSize = 12.sp
+                        )
+                    }
                 }
                 Surface(
                     color = PanelRaised,
