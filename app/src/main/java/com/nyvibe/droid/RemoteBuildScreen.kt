@@ -460,7 +460,7 @@ internal fun RemoteBuildScreen() {
                                 }
                                 workspaceTarget = target
                                 if (target == null) {
-                                    message = "Le workspace courant n'est pas un clone Git géré par NyVibeDroid. Ouvre d'abord le dépôt depuis l'onglet Git, puis reviens ici."
+                                    message = "Aucun workspace Git géré ni dépôt Git actif disponible. Dans l'onglet Git, clone ou sélectionne un dépôt GitHub, puis utilise « Définir comme Workspace actif et ouvrir »."
                                     messageIsError = true
                                 } else {
                                     repository = target.repository
