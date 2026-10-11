@@ -112,32 +112,35 @@ internal fun RemoteBuildScreen() {
         }
     }
 
-    // Poll active builds while the screen remains open. The user can always refresh manually.
-    LaunchedEffect(currentRun?.id, currentRun?.status, token) {
-        val activeRun = currentRun
+    // Poll repeatedly while the screen remains open, without restarting the loop on every status refresh.
+    LaunchedEffect(currentRun?.id, token) {
+        val activeRunId = currentRun?.id
         val activeToken = token
-        if (activeRun != null && activeToken != null && activeRun.status != "completed") {
-            delay(8_000)
-            runCatching {
-                withContext(Dispatchers.IO) { GitHubBuildClient.getRun(activeToken, activeRun.id) }
-            }.onSuccess { updated ->
-                currentRun = updated
-                if (updated.status == "completed") {
-                    artifactId = runCatching {
-                        withContext(Dispatchers.IO) {
-                            GitHubBuildClient.getArtifactId(activeToken, updated.id)
-                        }
-                    }.getOrNull()
-                    message = if (updated.conclusion == "success") {
-                        "Compilation terminée. L'APK et les logs sont prêts s'ils sont présents dans l'artefact."
-                    } else {
-                        "La compilation s'est terminée avec le statut « " +
-                            (updated.conclusion ?: "inconnu") + " ». Consulte les logs."
+        if (activeRunId != null && activeToken != null) {
+            while (currentRun?.id == activeRunId && currentRun?.status != "completed") {
+                delay(8_000)
+                try {
+                    val updated = withContext(Dispatchers.IO) {
+                        GitHubBuildClient.getRun(activeToken, activeRunId)
                     }
-                    messageIsError = updated.conclusion != "success"
+                    currentRun = updated
+                    if (updated.status == "completed") {
+                        artifactId = runCatching {
+                            withContext(Dispatchers.IO) {
+                                GitHubBuildClient.getArtifactId(activeToken, updated.id)
+                            }
+                        }.getOrNull()
+                        message = if (updated.conclusion == "success") {
+                            "Compilation terminée. L'APK et les logs sont prêts s'ils sont présents dans l'artefact."
+                        } else {
+                            "La compilation s'est terminée avec le statut « " +
+                                (updated.conclusion ?: "inconnu") + " ». Consulte les logs."
+                        }
+                        messageIsError = updated.conclusion != "success"
+                    }
+                } catch (_: Exception) {
+                    // Retain the last known state and try again on the next interval.
                 }
-            }.onFailure {
-                // Keep the last known state; a manual refresh can report the network error.
             }
         }
     }
