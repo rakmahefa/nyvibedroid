@@ -47,8 +47,9 @@ The **Remote Build** screen triggers the companion Build Engine, tracks a workfl
 
 1. Create a fine-grained GitHub personal access token for the rakmahefa/build repository. Grant Actions: Read and write.
 2. Enter the token in NyVibeDroid and select **Connecter**. The app validates it and encrypts it with Android Keystore.
-3. Enter a target repository in owner/name format and a branch, tag, or commit.
-4. Start the compilation, then open its logs or download the debug APK to Downloads/NyVibeDroid.
+3. Tap **Use current workspace** to fill the target repository and branch when Workspace is an app-managed Git clone, or enter a target repository in owner/name format and a branch, tag, or commit manually.
+4. Commit and Push local changes first. Remote Build checks out the branch from GitHub; it does not transmit uncommitted local files from the phone.
+5. Start the compilation, then open its logs or download the debug APK to Downloads/NyVibeDroid.
 
 The active build refreshes while the screen is open and the last run is remembered across app restarts. The owner has manually verified the end-to-end flow: connection, project compilation, and APK download.
 
