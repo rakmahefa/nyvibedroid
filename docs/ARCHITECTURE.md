@@ -19,6 +19,8 @@ Keep local file access, editor state, Git repository operations, GitHub Actions 
 
 ## Workspace access and editor
 
+The Workspace screen can import an Android SAF-selected folder into app-private `files/projects/workspaces/` storage and initialize it as a local JGit repository. The selected source folder is copied, not modified. Once imported, Workspace switches to the managed copy; Git and Workspace then operate on the same files.
+
 1. User may select an arbitrary folder with Android's document-tree picker; NyVibeDroid keeps the granted URI.
 2. For app-managed Git clones, the workspace root is a file URI created by the Git manager and checked to be inside files/projects/.
 3. File listing is limited to that root; the Git metadata directory (.git) is hidden from the editor.
@@ -41,12 +43,12 @@ The first implementation intentionally does not implement SSH, alternate Git hos
 
 ## Remote build flow
 
-1. User sets a cloned repository as the active Workspace from the Git screen, or Remote Build falls back to the explicitly active Git repository when the selected Workspace is an unrelated SAF folder. The owner/repository and branch are then filled from the selected clone, or may be entered manually.
-2. App warns when the matching local clone has uncommitted or unpushed commits. The Build Engine checks out the GitHub remote ref; local files are not uploaded by this workflow, so changes must be committed and pushed first.
-3. App validates the Remote Build token and dispatches workflow_dispatch to rakmahefa/build.
+1. User chooses **Workspace ZIP** to build the active local Workspace, or **Branche GitHub** to build a remote repository/ref.
+2. For ZIP mode, the app streams workspace files into a bounded archive, excluding Git metadata, common generated caches, and known local secret/config files. It uploads the archive as an asset on a temporary private draft release in `rakmahefa/build`.
+3. App dispatches `remote-build.yml` with the source mode and, for ZIP mode, the temporary release ID. The Build Engine safely validates and extracts the archive into `target/` before using the same Android Gradle builder.
 4. App locates the new run, records its ID, and polls GitHub Actions.
-4. When the run completes, the app discovers the build-android artifact.
-5. User opens bounded log excerpts or downloads the debug APK to Downloads.
+5. When the run completes, the app discovers the build-android artifact, removes the temporary release and tag, and makes logs/APKs available for download.
+6. A scheduled Build Engine workflow deletes abandoned workspace upload releases older than 24 hours.
 
 The Remote Build token is only for the GitHub Actions API and is not forwarded to the target build process. Private build targets require a separate read-only BUILD_TARGET_TOKEN Actions secret in the Build Engine repository.
 
