@@ -1,6 +1,8 @@
 package com.nyvibe.droid
 
 import android.os.Bundle
+import android.graphics.Color as AndroidColor
+import androidx.core.view.WindowCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -48,6 +50,9 @@ private enum class AppSection(val label: String, val symbol: String) {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = AndroidColor.TRANSPARENT
+        window.navigationBarColor = AndroidColor.TRANSPARENT
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
