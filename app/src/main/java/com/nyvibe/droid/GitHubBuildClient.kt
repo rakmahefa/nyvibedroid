@@ -38,6 +38,8 @@ internal object GitHubBuildClient {
         }
         require(targetRef.isNotBlank()) { "La branche, le tag ou le commit est obligatoire." }
 
+        // Snapshot existing runs first because workflow_dispatch returns HTTP 204, not a run ID.
+        val existingRunIds = listRuns(token).mapTo(mutableSetOf()) { it.id }
         val dispatchedAt = System.currentTimeMillis()
         val body = JSONObject()
             .put("ref", "main")
@@ -50,11 +52,10 @@ internal object GitHubBuildClient {
             )
         request(token, "/repos/$ENGINE_REPOSITORY/actions/workflows/$WORKFLOW/dispatches", "POST", body.toString())
 
-        // workflow_dispatch returns HTTP 204 without a run ID, so locate the new run.
         repeat(18) {
             Thread.sleep(1_500)
             val run = listRuns(token).firstOrNull {
-                parseTimestamp(it.createdAt) >= dispatchedAt - 20_000L
+                it.id !in existingRunIds && parseTimestamp(it.createdAt) >= dispatchedAt - 5_000L
             }
             if (run != null) return run
         }
