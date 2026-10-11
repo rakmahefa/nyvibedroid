@@ -80,6 +80,7 @@ internal fun RemoteBuildScreen() {
     var connected by remember { mutableStateOf(token != null) }
     var repository by rememberSaveable { mutableStateOf("rakmahefa/nyvibedroid") }
     var targetRef by rememberSaveable { mutableStateOf("main") }
+    var workspaceTarget by remember { mutableStateOf<WorkspaceBuildTarget?>(null) }
     var currentRunId by remember { mutableStateOf(tokenStore.loadRunId()) }
     var currentRun by remember { mutableStateOf<BuildRun?>(null) }
     var artifactId by remember { mutableStateOf<Long?>(null) }
@@ -89,6 +90,12 @@ internal fun RemoteBuildScreen() {
     var messageIsError by remember { mutableStateOf(false) }
     var logText by remember { mutableStateOf<String?>(null) }
     var showLogs by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        workspaceTarget = withContext(Dispatchers.IO) {
+            GitRepositoryManager.currentWorkspaceBuildTarget(context)
+        }
+    }
 
     LaunchedEffect(token, currentRunId) {
         val savedToken = token
@@ -442,6 +449,60 @@ internal fun RemoteBuildScreen() {
                     singleLine = true,
                     enabled = !busy
                 )
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            busy = true
+                            busyLabel = "Lecture du workspace…"
+                            try {
+                                val target = withContext(Dispatchers.IO) {
+                                    GitRepositoryManager.currentWorkspaceBuildTarget(context)
+                                }
+                                workspaceTarget = target
+                                if (target == null) {
+                                    message = "Le workspace courant n'est pas un clone Git géré par NyVibeDroid. Ouvre d'abord le dépôt depuis l'onglet Git, puis reviens ici."
+                                    messageIsError = true
+                                } else {
+                                    repository = target.repository
+                                    targetRef = target.ref
+                                    message = "Cible du workspace sélectionnée : " + target.repository + " · " + target.ref + "."
+                                    messageIsError = false
+                                }
+                            } catch (error: Exception) {
+                                showError(error)
+                            } finally {
+                                busy = false
+                                busyLabel = ""
+                            }
+                        }
+                    },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Utiliser le workspace courant", color = Foreground)
+                }
+                val selectedWorkspaceTarget = workspaceTarget?.takeIf {
+                    repository.equals(it.repository, ignoreCase = true) && targetRef == it.ref
+                }
+                if (selectedWorkspaceTarget != null) {
+                    val hasUnsyncedCode = selectedWorkspaceTarget.hasLocalChanges || selectedWorkspaceTarget.commitsAhead > 0
+                    Text(
+                        if (hasUnsyncedCode) {
+                            "Modifications locales ou commits non poussés détectés. Remote Build compile la copie GitHub : fais Commit puis Push dans Git avant de lancer le build pour inclure ces changements."
+                        } else {
+                            "Workspace lié. Remote Build compile la branche distante sur GitHub ; les fichiers locaux non committés ne sont pas transférés."
+                        },
+                        color = if (hasUnsyncedCode) Danger else Muted,
+                        fontSize = 12.sp
+                    )
+                } else if (workspaceTarget == null) {
+                    Text(
+                        "Le bouton Workspace fonctionne pour un dépôt cloné depuis l'onglet Git. Un dossier choisi directement via le sélecteur Android ne possède pas de cible GitHub automatique.",
+                        color = Muted,
+                        fontSize = 12.sp
+                    )
+                }
                 Surface(
                     color = PanelRaised,
                     shape = RoundedCornerShape(12.dp),
