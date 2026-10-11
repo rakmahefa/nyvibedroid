@@ -41,9 +41,10 @@ The first implementation intentionally does not implement SSH, alternate Git hos
 
 ## Remote build flow
 
-1. User supplies target repository (owner/name) and branch/tag/commit.
-2. App validates the Remote Build token and dispatches workflow_dispatch to rakmahefa/build.
-3. App locates the new run, records its ID, and polls GitHub Actions.
+1. User may copy the remote owner/repository and current branch from the active Workspace when it is an app-managed Git clone, or enter a repository/ref manually.
+2. App warns when the matching local clone has uncommitted or unpushed commits. The Build Engine checks out the GitHub remote ref; local files are not uploaded by this workflow, so changes must be committed and pushed first.
+3. App validates the Remote Build token and dispatches workflow_dispatch to rakmahefa/build.
+4. App locates the new run, records its ID, and polls GitHub Actions.
 4. When the run completes, the app discovers the build-android artifact.
 5. User opens bounded log excerpts or downloads the debug APK to Downloads.
 
