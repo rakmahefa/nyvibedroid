@@ -270,6 +270,28 @@ internal fun GitRepositoryScreen(onOpenInWorkspace: (String) -> Unit) {
                     }
                 }
             }
+            if (selectedPath != null) {
+                OutlinedButton(
+                    onClick = {
+                        val path = selectedPath ?: return@OutlinedButton
+                        runCatching {
+                            val uri = GitRepositoryManager.managedDirectoryUri(context, path)
+                            WorkspaceRepository.saveRootUri(context, android.net.Uri.parse(uri))
+                            onOpenInWorkspace(uri)
+                        }.onFailure { fail(it) }
+                    },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Définir comme Workspace actif et ouvrir", color = GitAccent)
+                }
+                Text(
+                    "Cette action relie le dépôt Git sélectionné au Workspace et le rend disponible comme cible de Remote Build.",
+                    color = GitMuted,
+                    fontSize = 11.sp
+                )
+            }
         }
 
         GitCard {
@@ -384,16 +406,6 @@ internal fun GitRepositoryScreen(onOpenInWorkspace: (String) -> Unit) {
                 ) { Text("Afficher le diff complet", color = GitText) }
             }
             Text("Ouvre le dépôt dans Workspace pour modifier le code. Les modifications sont suivies par Git dès leur sauvegarde.", color = GitMuted, fontSize = 11.sp)
-            OutlinedButton(
-                onClick = {
-                    val path = selectedPath ?: return@OutlinedButton
-                    runCatching {
-                        val uri = GitRepositoryManager.managedDirectoryUri(context, path)
-                        WorkspaceRepository.saveRootUri(context, android.net.Uri.parse(uri))
-                        onOpenInWorkspace(uri)
-                    }.onFailure { fail(it) }
-                }, enabled = !busy && selectedPath != null, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)
-            ) { Text("Ouvrir ce dépôt dans Workspace", color = GitAccent) }
         }
 
         if (errorMessage != null) GitMessage(errorMessage.orEmpty(), true)
