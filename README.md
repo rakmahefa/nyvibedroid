@@ -46,11 +46,12 @@ Git protects against invalid repository URLs and only clones from https://github
 
 The **Remote Build** screen triggers the companion Build Engine, tracks a workflow, displays build logs, and downloads the debug APK directly to the phone.
 
-1. Create a fine-grained GitHub personal access token for the rakmahefa/build repository. Grant Actions: Read and write.
+1. Create a fine-grained GitHub personal access token for `rakmahefa/build`. Grant **Actions: Read and write**. **Workspace ZIP** also needs **Contents: Read and write** on `rakmahefa/build` so the app can upload and delete a temporary private draft release.
 2. Enter the token in NyVibeDroid and select **Connecter**. The app validates it and encrypts it with Android Keystore.
-3. In **Git**, select a cloned repository and tap **Set as active Workspace and open**. In **Remote Build**, **Use current workspace / active Git repository** fills its GitHub repository and current branch. If Workspace points to an unrelated Android folder, the explicitly selected Git repository is used instead; an arbitrary SAF folder is not uploaded automatically. You may still enter a target repository in owner/name format and a branch, tag, or commit manually.
-4. Commit and Push local changes first. Remote Build checks out the branch from GitHub; it does not transmit uncommitted local files from the phone.
-5. Start the compilation, then open its logs or download the debug APK to Downloads/NyVibeDroid.
+3. Choose **Workspace ZIP** to compile the active Workspace exactly as it exists on the phone, without committing or pushing it to a Git branch. Or choose **Branche GitHub** to build a remote repository/ref.
+4. Start the compilation, then open its logs or download the debug APK to Downloads/NyVibeDroid.
+
+The ZIP archive excludes `.git`, common build/cache directories, `local.properties`, local `.env` files (except examples), and common private-key file types. Source content is limited to 512 MiB and the compressed ZIP to 200 MiB. It is uploaded as a temporary private draft release asset in the Build Engine repository; the app removes that release after the workflow finishes, and a scheduled workflow cleans up abandoned uploads after 24 hours. Review your project files before uploading.
 
 The active build refreshes while the screen is open and the last run is remembered across app restarts. The owner has manually verified the end-to-end flow: connection, project compilation, and APK download.
 
