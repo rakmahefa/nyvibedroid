@@ -1,126 +1,73 @@
-# nyvibedroid
 # NyVibeDroid
 
 **A mobile Vibe Coding environment for Android. Code, build, and create anywhere.**
 
-NyVibeDroid aims to bring a modern development environment to Android smartphones, combining local AI-assisted coding, project management, Git integration, and cloud-powered builds.
+NyVibeDroid aims to turn an Android phone into a portable development workstation, with a native editor, project and Git management, on-device AI assistance, and remote builds.
 
-> **Project status:** In development. Features described below represent the project vision and may not all be implemented yet.
+> **Status:** Early development. The current app is a minimal Jetpack Compose MVP; the editor, workspace manager, Git UI, local AI, and in-app build dashboard are not implemented yet.
 
-## Vision
+## Current build workflow
 
-Turn an Android smartphone into a portable development workstation. Write and modify code locally, use on-device AI assistance, and delegate heavy compilation tasks to GitHub Actions.
+The Android build is the only target currently enabled in the remote Build Engine. Linux and Windows support remains planned and is deliberately disabled until those builders can produce and verify real binaries.
 
-## Core Features
+### Continuous integration
 
-- **Code Editor** — Browse and edit project files directly on Android.
-- **Local AI** — Integrate Cactus AI for private, on-device code generation and assistance.
-- **Project Manager** — Organize workspaces and navigate project structures.
-- **Git Integration** — Manage repositories, branches, commits, and synchronization.
-- **Integrated Terminal** — Run development commands from the mobile environment.
-- **Cloud Build Engine** — Trigger remote builds and retrieve artifacts and logs.
-- **Multi-platform Build Vision** — Support Android APKs, Linux applications, and Windows executables through compatible build workflows.
+The **Android CI** workflow runs on pushes to `main` and `agent`, pull requests targeting `main`, and manual dispatches. It runs unit tests, compiles debug and release APKs, verifies that APK files exist, and uploads the APKs plus the build log. Missing APKs fail the workflow instead of being treated as success.
 
-## Architecture
+### Release builds
 
-```text
-┌─────────────────────────────────┐
-│       NyVibeDroid (Android)     │
-│                                 │
-│  Editor · Projects · Git        │
-│  Local AI · Build Dashboard     │
-└───────────────┬─────────────────┘
-                │
-       ┌────────┴────────┐
-       │                 │
-       ▼                 ▼
-┌──────────────┐  ┌─────────────────┐
-│  Cactus AI   │  │  GitHub Actions │
-│              │  │  Build Engine   │
-│ Local coding │  │  Remote builds  │
-└──────────────┘  └────────┬────────┘
-                           │
-                           ▼
-                  ┌─────────────────┐
-                  │ Artifacts & Logs│
-                  │ APK / Linux /   │
-                  │ Windows outputs │
-                  └─────────────────┘
+Push a version tag to build and publish a GitHub Release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
-Local AI inference is intended to keep code processing on-device. Source files sent to remote repositories or build runners are subject to the corresponding synchronization and cloud-build operations.
+The release includes an installable debug APK, a release APK, the build log, and SHA-256 checksums. Without signing secrets, the release APK is explicitly labelled **unsigned**; the debug APK is signed with Android's debug key and is intended for testing.
 
-## Repositories
+For signed release APKs, configure all four repository Actions secrets:
 
-- **NyVibeDroid — Android application:** https://github.com/rakmahefa/nyvibedroid
-- **Build Engine — CI/CD infrastructure:** https://github.com/rakmahefa/build
+- `ANDROID_KEYSTORE_BASE64`: base64-encoded release keystore
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
 
-The Build Engine repository is intended to contain reusable GitHub Actions workflows, build scripts, and build-related configuration rather than the Android application's source code.
+Never commit a keystore or signing passwords to the repository. Running the release workflow manually builds and uploads artifacts but only publishes a GitHub Release when the selected ref is a tag starting with `v`.
 
-## Technology Stack
+### Build locally
+
+Requirements: JDK 17, Android SDK Platform 35, and Gradle 8.9. This repository does not currently include the Gradle Wrapper, so install Gradle 8.9 or open the project in Android Studio.
+
+```bash
+gradle --no-daemon test assembleDebug assembleRelease
+```
+
+The APKs are written to `app/build/outputs/apk/debug/` and `app/build/outputs/apk/release/`.
+
+## Remote Build Engine
+
+The companion repository is [rakmahefa/build](https://github.com/rakmahefa/build). Its **Remote Build Engine** workflow can check out a repository and branch, build an Android Gradle project, then upload APKs, build metadata, and logs as a GitHub Actions artifact.
+
+Public repositories can be built directly. To check out private target repositories, configure a read-only `BUILD_TARGET_TOKEN` Actions secret in the Build Engine repository.
+
+## Planned features
+
+- Code editor and file explorer for Android
+- Workspace and project management
+- Git operations: status, branches, commits, and synchronization
+- Cactus AI integration for local code assistance
+- Remote build request UI with status, logs, and artifact downloads
+- Additional build targets once the corresponding builders are implemented
+
+## Technology
 
 - Kotlin
-- Android SDK
-- Jetpack Compose
+- Android SDK and Jetpack Compose
 - Gradle
-- Git
-- GitHub Actions
-- Cactus AI (planned local AI integration)
+- Git and GitHub Actions
+- Cactus AI (planned local integration)
 
-## Getting Started
+## Repository separation
 
-Clone the repository:
-
-```bash
-git clone https://github.com/rakmahefa/nyvibedroid.git
-cd nyvibedroid
-```
-
-Open the project in Android Studio and allow Gradle synchronization to complete.
-
-When the Gradle Wrapper is configured, build the application:
-
-```bash
-./gradlew assembleDebug
-```
-
-For a release build:
-
-```bash
-./gradlew assembleRelease
-```
-
-The expected APK output directory is:
-
-```text
-app/build/outputs/apk/
-```
-
-A successful build also depends on the project's current Gradle configuration, SDK requirements, and dependencies.
-
-## Cloud Build Workflow
-
-The intended workflow is:
-
-1. Select a project and target platform.
-2. Submit a build request to GitHub Actions.
-3. Check out the requested source revision.
-4. Run the appropriate build pipeline.
-5. Collect build logs and generated artifacts.
-6. Download the result to the Android device.
-
-## Development Roadmap
-
-- [ ] Establish a reliable Android release pipeline.
-- [ ] Deliver an installable Android APK.
-- [ ] Build the mobile project explorer and code editor.
-- [ ] Add workspace and Git management.
-- [ ] Integrate local Cactus AI.
-- [ ] Connect NyVibeDroid to the remote Build Engine.
-- [ ] Retrieve build status, logs, and artifacts.
-- [ ] Expand support for compatible Linux and Windows build targets.
-
-## Project Goal
-
-**A portable development environment where your ideas become working software, directly from your Android device.**
-
+- **Android application:** https://github.com/rakmahefa/nyvibedroid
+- **Build infrastructure:** https://github.com/rakmahefa/build

@@ -3,27 +3,92 @@ name: Android Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
+    name: Build Android release
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 30
+    env:
+      ANDROID_VERSION_CODE: ${{ github.run_number }}
+      ANDROID_VERSION_NAME: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('0.1.0-dev.{0}', github.run_number) }}
 
-      - name: Setup JDK
-        uses: actions/setup-java@v4
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '17'
-          cache: gradle
+          java-version: "17"
 
-      - name: Build APK
-        run: ./gradlew assembleRelease
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v6
         with:
-          name: nyvibedroid-release
-          path: app/build/outputs/apk/release/*.apk
+          gradle-version: "8.9"
+
+      - name: Configure optional release signing
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/nyvibedroid-release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/nyvibedroid-release.jks" >> "$GITHUB_ENV"
+
+      - name: Build and test APKs
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon clean test assembleDebug assembleRelease 2>&1 | tee build.log
+
+      - name: Package APKs and checksums
+        env:
+          VERSION: ${{ env.ANDROID_VERSION_NAME }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/NyVibeDroid-${VERSION}-debug.apk"
+
+          release_dir="app/build/outputs/apk/release"
+          signed_apk="$(find "$release_dir" -maxdepth 1 -type f -name '*.apk' ! -name '*unsigned*' -print -quit || true)"
+          unsigned_apk="$(find "$release_dir" -maxdepth 1 -type f -name '*unsigned*.apk' -print -quit || true)"
+
+          if [[ -n "$signed_apk" ]]; then
+            cp "$signed_apk" "dist/NyVibeDroid-${VERSION}-release.apk"
+          elif [[ -n "$unsigned_apk" ]]; then
+            cp "$unsigned_apk" "dist/NyVibeDroid-${VERSION}-release-unsigned.apk"
+          else
+            echo "No release APK was produced." >&2
+            exit 1
+          fi
+
+          cp build.log dist/build.log
+          (cd dist && sha256sum ./*.apk > SHA256SUMS.txt)
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: nyvibedroid-release-${{ github.run_number }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
