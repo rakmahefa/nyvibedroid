@@ -427,7 +427,7 @@ internal fun RemoteBuildScreen() {
             ) {
                 SectionTitle(number = "01", title = "Connexion GitHub", trailing = if (connected) "CONNECTÉ" else "REQUIS")
                 Text(
-                    "Jeton personnel avec la permission Actions : Read and write sur le dépôt rakmahefa/build.",
+                    "Mode branche : Actions Read and write sur rakmahefa/build. Mode Workspace ZIP : Actions Read and write + Contents Read and write sur rakmahefa/build pour envoyer puis supprimer l’archive temporaire.",
                     color = Muted,
                     fontSize = 13.sp
                 )
