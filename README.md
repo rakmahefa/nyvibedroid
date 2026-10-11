@@ -35,7 +35,7 @@ To clone a repository, enter owner/repository or an HTTPS GitHub URL. The first 
 
 #### GitHub permissions and credentials
 
-The Git section stores its credential separately from the Remote Build token and encrypts it with Android Keystore. Public repositories can be cloned without a token. Private clone/fetch requires a token with repository Contents: read access; pushing to a repository requires Contents: read and write. Use a fine-grained personal access token limited to the repositories you trust and never share it.
+The Git section stores its credential separately from the Remote Build token and encrypts it with Android Keystore. Public repositories can be cloned without a token. Private clone/fetch requires a token with repository Contents: read access; pushing to a repository requires Contents: read and write. If a token is typed into the Git screen, the next Fetch/Pull/Push action uses it and saves it encrypted on-device. A Push without a saved or entered token is stopped with a clear authentication message. Use a fine-grained personal access token limited to the repositories you trust and never share it.
 
 The Remote Build screen uses a separate token for Actions access to rakmahefa/build. These credentials have distinct storage and purposes.
 
