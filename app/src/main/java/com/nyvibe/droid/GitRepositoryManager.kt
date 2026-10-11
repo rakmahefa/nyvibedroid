@@ -45,6 +45,8 @@ internal data class GitRepositoryState(
 internal object GitRepositoryManager {
     private const val PREFS = "git_repository_settings"
     private const val SELECTED_REPOSITORY = "selected_repository"
+    private const val COMMIT_NAME = "commit_name"
+    private const val COMMIT_EMAIL = "commit_email"
     private const val PROJECTS_FOLDER = "projects"
     private const val MAX_DIFF_CHARS = 32_000
 
@@ -78,6 +80,11 @@ internal object GitRepositoryManager {
     fun saveCredential(context: Context, token: String) = GitCredentialStore(context).save(token)
     fun loadCredential(context: Context): String? = GitCredentialStore(context).load()
     fun clearCredential(context: Context) = GitCredentialStore(context).clear()
+
+    fun loadIdentity(context: Context): Pair<String, String> {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return prefs.getString(COMMIT_NAME, "").orEmpty() to prefs.getString(COMMIT_EMAIL, "").orEmpty()
+    }
 
     fun listRepositories(context: Context): List<LocalGitRepository> {
         val root = projectsDirectory(context)
@@ -213,15 +220,27 @@ internal object GitRepositoryManager {
         }
     }
 
-    fun commitAll(context: Context, directory: String, message: String) {
+    fun commitAll(context: Context, directory: String, message: String, authorName: String, authorEmail: String) {
         require(message.isNotBlank()) { "Saisis un message de commit." }
+        require(authorName.isNotBlank()) { "Saisis le nom de l'auteur du commit." }
+        require(authorEmail.matches(Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$"))) {
+            "Saisis une adresse e-mail valide pour les commits."
+        }
         val root = managedRepository(context, directory)
         openRepository(root).use { git ->
             git.add().addFilepattern(".").call()
             git.add().addFilepattern(".").setUpdate(true).call()
             if (git.status().call().isClean) throw IOException("Aucune modification à committer.")
-            git.commit().setMessage(message.trim()).call()
+            git.commit()
+                .setMessage(message.trim())
+                .setAuthor(authorName.trim(), authorEmail.trim())
+                .setCommitter(authorName.trim(), authorEmail.trim())
+                .call()
         }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(COMMIT_NAME, authorName.trim())
+            .putString(COMMIT_EMAIL, authorEmail.trim())
+            .apply()
     }
 
     fun fetch(context: Context, directory: String, token: String?) {
