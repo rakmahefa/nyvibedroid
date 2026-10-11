@@ -42,6 +42,13 @@ internal data class GitRepositoryState(
     val lastCommit: String?
 )
 
+internal data class WorkspaceBuildTarget(
+    val repository: String,
+    val ref: String,
+    val hasLocalChanges: Boolean,
+    val commitsAhead: Int
+)
+
 internal object GitRepositoryManager {
     private const val PREFS = "git_repository_settings"
     private const val SELECTED_REPOSITORY = "selected_repository"
@@ -102,6 +109,48 @@ internal object GitRepositoryManager {
 
     fun selectedRepository(context: Context): String? =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(SELECTED_REPOSITORY, null)
+
+    /** Returns a remote build target only when the selected Workspace is a NyVibeDroid-managed Git clone. */
+    fun currentWorkspaceBuildTarget(context: Context): WorkspaceBuildTarget? {
+        val savedRoot = WorkspaceRepository.loadRootUri(context) ?: return null
+        val uri = Uri.parse(savedRoot)
+        if (uri.scheme != "file") return null
+        val root = runCatching { File(uri.path.orEmpty()).canonicalFile }.getOrNull() ?: return null
+        val projectsRoot = projectsDirectory(context)
+        if (!root.path.startsWith(projectsRoot.path + File.separator) || !File(root, ".git").isDirectory) {
+            return null
+        }
+
+        return try {
+            openRepository(root).use { git ->
+                val gitRepository = git.repository
+                val branch = gitRepository.branch ?: throw IOException("Le workspace n'a pas de branche Git active.")
+                val rawRemote = gitRepository.config.getString("remote", "origin", "url")
+                    ?: throw IOException("Le workspace n'a pas de dépôt distant origin.")
+                val normalizedRemote = normalizeRemoteUrl(rawRemote)
+                val parts = URI(normalizedRemote).path.trim('/').split('/')
+                if (parts.size != 2) throw IOException("Le dépôt distant du workspace n'est pas reconnu.")
+
+                val remoteName = gitRepository.config.getString("branch", branch, "remote")
+                val mergeRef = gitRepository.config.getString("branch", branch, "merge")
+                val tracking = if (!remoteName.isNullOrBlank() && !mergeRef.isNullOrBlank()) {
+                    "refs/remotes/" + remoteName + "/" + Repository.shortenRefName(mergeRef)
+                } else null
+                val ahead = if (!tracking.isNullOrBlank() && gitRepository.resolve(tracking) != null) {
+                    runCatching { countAheadBehind(gitRepository, tracking).first }.getOrDefault(0)
+                } else 0
+
+                WorkspaceBuildTarget(
+                    repository = parts[0] + "/" + parts[1].removeSuffix(".git"),
+                    ref = branch,
+                    hasLocalChanges = !git.status().call().isClean,
+                    commitsAhead = ahead
+                )
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     fun selectRepository(context: Context, directory: String) {
         val repo = managedRepository(context, directory)
@@ -253,7 +302,11 @@ internal object GitRepositoryManager {
         openRepository(root).use { git ->
             val command = git.fetch().setRemoveDeletedRefs(true)
             credentialsProvider(token)?.let { command.setCredentialsProvider(it) }
-            command.call()
+            try {
+                command.call()
+            } catch (error: Exception) {
+                throw IOException(gitError(error), error)
+            }
         }
     }
 
@@ -262,7 +315,11 @@ internal object GitRepositoryManager {
         openRepository(root).use { git ->
             val command = git.pull()
             credentialsProvider(token)?.let { command.setCredentialsProvider(it) }
-            val result = command.call()
+            val result = try {
+                command.call()
+            } catch (error: Exception) {
+                throw IOException(gitError(error), error)
+            }
             if (!result.isSuccessful) {
                 val status = result.mergeResult?.mergeStatus?.name ?: result.rebaseResult?.status?.name ?: "conflit ou branche sans suivi distant"
                 throw IOException("Pull non terminé : $status.")
@@ -271,17 +328,28 @@ internal object GitRepositoryManager {
     }
 
     fun push(context: Context, directory: String, token: String?) {
+        if (token.isNullOrBlank()) {
+            throw IOException("Authentification GitHub manquante. Saisis puis enregistre un jeton avec Contents: Read and write pour pousser.")
+        }
         val root = managedRepository(context, directory)
         openRepository(root).use { git ->
             val branch = git.repository.branch ?: throw IOException("Impossible de pousser depuis un HEAD détaché.")
             val command = git.push().setRefSpecs(RefSpec("HEAD:refs/heads/$branch"))
             credentialsProvider(token)?.let { command.setCredentialsProvider(it) }
-            val failures = command.call().flatMap { it.remoteUpdates }.filter {
+            val updates = try {
+                command.call().flatMap { it.remoteUpdates }
+            } catch (error: Exception) {
+                throw IOException(gitError(error), error)
+            }
+            val failures = updates.filter {
                 it.status != RemoteRefUpdate.Status.OK && it.status != RemoteRefUpdate.Status.UP_TO_DATE
             }
             if (failures.isNotEmpty()) {
-                val details = failures.joinToString { "${it.remoteName}: ${it.status}" }
-                throw IOException("Push refusé : $details. Vérifie les droits ou récupère d'abord les changements distants.")
+                if (failures.any { it.status.name.contains("NONFASTFORWARD") }) {
+                    throw IOException("Push refusé : la branche distante contient des commits absents localement. Fais Fetch/Pull, résous les conflits éventuels, puis réessaie.")
+                }
+                val details = failures.joinToString { it.remoteName + ": " + it.status }
+                throw IOException("Push refusé : " + details + ". Vérifie que le jeton a Contents: Read and write et accès à ce dépôt.")
             }
         }
     }
