@@ -41,7 +41,7 @@ The first implementation intentionally does not implement SSH, alternate Git hos
 
 ## Remote build flow
 
-1. User may copy the remote owner/repository and current branch from the active Workspace when it is an app-managed Git clone, or enter a repository/ref manually.
+1. User sets a cloned repository as the active Workspace from the Git screen, or Remote Build falls back to the explicitly active Git repository when the selected Workspace is an unrelated SAF folder. The owner/repository and branch are then filled from the selected clone, or may be entered manually.
 2. App warns when the matching local clone has uncommitted or unpushed commits. The Build Engine checks out the GitHub remote ref; local files are not uploaded by this workflow, so changes must be committed and pushed first.
 3. App validates the Remote Build token and dispatches workflow_dispatch to rakmahefa/build.
 4. App locates the new run, records its ID, and polls GitHub Actions.
