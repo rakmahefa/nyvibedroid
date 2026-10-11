@@ -245,7 +245,7 @@ internal fun WorkspaceScreen() {
                             )
                         }
                         Button(
-                            onClick = { folderPicker.launch(rootUri?.let { Uri.parse(it) }) },
+                            onClick = { folderPicker.launch(rootUri?.let { Uri.parse(it) }?.takeIf { it.scheme == "content" }) },
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = WorkspaceAccent, contentColor = WorkspaceCanvas)
                         ) {
