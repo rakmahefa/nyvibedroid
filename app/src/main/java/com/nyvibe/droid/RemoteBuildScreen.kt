@@ -80,6 +80,8 @@ internal fun RemoteBuildScreen() {
     var connected by remember { mutableStateOf(token != null) }
     var repository by rememberSaveable { mutableStateOf("rakmahefa/nyvibedroid") }
     var targetRef by rememberSaveable { mutableStateOf("main") }
+    var buildSourceMode by rememberSaveable { mutableStateOf("workspace_zip") }
+    var workspaceUpload by remember { mutableStateOf(tokenStore.loadWorkspaceUpload()) }
     var workspaceTarget by remember { mutableStateOf<WorkspaceBuildTarget?>(null) }
     var currentRunId by remember { mutableStateOf(tokenStore.loadRunId()) }
     var currentRun by remember { mutableStateOf<BuildRun?>(null) }
@@ -228,20 +230,26 @@ internal fun RemoteBuildScreen() {
             messageIsError = true
             return
         }
-        if (!repository.matches(Regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))) {
-            message = "Le dépôt doit être au format propriétaire/dépôt."
-            messageIsError = true
-            return
-        }
-        if (targetRef.isBlank()) {
-            message = "La branche, le tag ou le commit est obligatoire."
+        if (buildSourceMode == "github_ref") {
+            if (!repository.matches(Regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"))) {
+                message = "Le dépôt doit être au format propriétaire/dépôt."
+                messageIsError = true
+                return
+            }
+            if (targetRef.isBlank()) {
+                message = "La branche, le tag ou le commit est obligatoire."
+                messageIsError = true
+                return
+            }
+        } else if (WorkspaceRepository.loadRootUri(context).isNullOrBlank()) {
+            message = "Choisis d'abord un dossier dans l'onglet Workspace."
             messageIsError = true
             return
         }
 
         scope.launch {
             busy = true
-            busyLabel = "Envoi de la demande…"
+            busyLabel = "Vérification du jeton…"
             message = null
             try {
                 withContext(Dispatchers.IO) { GitHubBuildClient.validateToken(candidate) }
@@ -249,15 +257,45 @@ internal fun RemoteBuildScreen() {
                 token = candidate
                 connected = true
                 tokenDraft = ""
-                busyLabel = "Démarrage du workflow GitHub…"
-                val created = withContext(Dispatchers.IO) {
-                    GitHubBuildClient.dispatchBuild(candidate, repository.trim(), targetRef.trim())
+
+                val created = if (buildSourceMode == "workspace_zip") {
+                    busyLabel = "Compression du workspace…"
+                    val archive = withContext(Dispatchers.IO) {
+                        WorkspaceRepository.createWorkspaceArchive(
+                            context,
+                            File(context.cacheDir, "nyvibedroid-workspace-" + System.currentTimeMillis() + ".zip")
+                        )
+                    }
+                    val upload = try {
+                        busyLabel = "Téléversement du ZIP privé…"
+                        withContext(Dispatchers.IO) {
+                            GitHubBuildClient.uploadWorkspaceArchive(candidate, archive)
+                        }
+                    } finally {
+                        archive.delete()
+                    }
+                    tokenStore.saveWorkspaceUpload(upload)
+                    workspaceUpload = upload
+                    busyLabel = "Démarrage du build distant…"
+                    withContext(Dispatchers.IO) {
+                        GitHubBuildClient.dispatchWorkspaceArchiveBuild(candidate, upload.id)
+                    }
+                } else {
+                    busyLabel = "Démarrage du workflow GitHub…"
+                    withContext(Dispatchers.IO) {
+                        GitHubBuildClient.dispatchBuild(candidate, repository.trim(), targetRef.trim())
+                    }
                 }
+
                 tokenStore.saveRunId(created.id)
                 currentRunId = created.id
                 currentRun = created
                 artifactId = null
-                message = "Demande envoyée à Build Engine pour " + repository.trim() + " · " + targetRef.trim() + "."
+                message = if (buildSourceMode == "workspace_zip") {
+                    "Workspace envoyé en ZIP privé. Compilation demandée sans push de branche. Les APK et logs seront disponibles à la fin."
+                } else {
+                    "Demande envoyée à Build Engine pour " + repository.trim() + " · " + targetRef.trim() + "."
+                }
                 messageIsError = false
             } catch (error: Exception) {
                 showError(error)
