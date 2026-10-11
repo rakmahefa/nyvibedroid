@@ -2,61 +2,81 @@
 
 **A mobile Vibe Coding environment for Android. Code, build, and create anywhere.**
 
-NyVibeDroid is an Android development workspace being built around three focused areas: local project files, a text editor, and remote Android builds.
+NyVibeDroid is an Android development workspace built around local project files, code editing, Git version control, and remote Android builds.
 
-> **Status:** The app currently includes a local workspace/file explorer with a basic text editor and save flow, plus a remote-build dashboard backed by the companion Build Engine. Git operations and local AI assistance are not implemented yet.
+> **Status:** The app includes a local workspace/file explorer and basic text editor, a Git repository manager powered by JGit, and a remote-build dashboard backed by the companion Build Engine. Local AI assistance is not implemented yet.
 
 ## What works today
 
 ### Workspace and text editor
 
-- Choose a project folder with Android's system folder picker.
-- Keep persistent read/write access to that selected folder.
-- Browse folders and files; folders appear before files and can be navigated with breadcrumbs and a back control.
-- Create new text files in the current folder.
-- Open and edit common source and project files (Kotlin, Java, Gradle, XML, JSON, Markdown, YAML, text, scripts, and more).
-- Save edits back to the original file, or discard unsaved changes.
-- Keep files on the user's device; access is limited to the folder explicitly granted through the system picker.
+- Choose a folder with Android's system folder picker and retain read/write access.
+- Browse folders and files, create text files, edit common source/project files, save changes, or discard them.
+- Edit UTF-8 text up to 1 MiB. Binary or unrecognized file types are not opened.
+- Open a repository cloned through the Git section in the same Workspace editor.
 
-For safety and responsiveness, the initial editor accepts UTF-8 text files up to 1 MiB. Binary or unrecognized file types are not opened in the editor. This is a lightweight first editor, not yet a full IDE: syntax highlighting, tabs, search, undo/redo, and project-wide indexing remain future improvements.
+This is a lightweight first editor, not yet a full IDE. Syntax highlighting, tabs, search, undo/redo, and project-wide indexing remain future improvements.
+
+### Git repository management
+
+Open the **Git** section to clone and manage a repository hosted on GitHub using HTTPS.
+
+- Clone a public or private repository into NyVibeDroid's app-private project storage.
+- Browse cloned repositories and select the active repository.
+- View the current branch, latest commit, local changes, and a best-effort ahead/behind count when a remote tracking branch exists.
+- Inspect staged and unstaged diff output.
+- Create or switch local branches.
+- Commit all current changes.
+- Fetch, pull, and push the current branch.
+
+To clone a repository, enter owner/repository or an HTTPS GitHub URL. The first version intentionally limits Git remotes to github.com over HTTPS; SSH and other Git hosting providers are not supported.
+
+**Storage model:** repositories cloned in the Git screen live in the app-private files/projects/ directory so JGit can safely access the working tree and .git metadata. Open the selected repository from the Git screen into Workspace to edit it. A directory separately opened through Android's folder picker remains a general local workspace and is not automatically treated as a Git repository.
+
+#### GitHub permissions and credentials
+
+The Git section stores its credential separately from the Remote Build token and encrypts it with Android Keystore. Public repositories can be cloned without a token. Private clone/fetch requires a token with repository Contents: read access; pushing to a repository requires Contents: read and write. Use a fine-grained personal access token limited to the repositories you trust and never share it.
+
+The Remote Build screen uses a separate token for Actions access to rakmahefa/build. These credentials have distinct storage and purposes.
+
+Git protects against invalid repository URLs and only clones from https://github.com/. Local Git commands run against the selected app-managed clone; there is no automatic commit or push.
 
 ### In-app remote Android builds
 
 The **Remote Build** screen triggers the companion Build Engine, tracks a workflow, displays build logs, and downloads the debug APK directly to the phone.
 
-1. Create a fine-grained GitHub personal access token for the rakmahefa/build repository. Grant **Actions: Read and write**. Keep the token private.
-2. Enter the token in NyVibeDroid and select **Connecter**. The app validates it and encrypts it with Android Keystore on the device.
-3. Enter a target repository in owner/name format and a branch, tag, or commit (the default is main).
-4. Tap **Lancer la compilation**. The app triggers the Remote Build Engine workflow and tracks its execution.
-5. Once the build finishes, open its logs or download the debug APK to Downloads/NyVibeDroid.
+1. Create a fine-grained GitHub personal access token for the rakmahefa/build repository. Grant Actions: Read and write.
+2. Enter the token in NyVibeDroid and select **Connecter**. The app validates it and encrypts it with Android Keystore.
+3. Enter a target repository in owner/name format and a branch, tag, or commit.
+4. Start the compilation, then open its logs or download the debug APK to Downloads/NyVibeDroid.
 
-The screen refreshes an active build while open and remembers the last run across app restarts. It also offers a manual refresh and a link to the matching GitHub Actions run. The owner has manually verified the end-to-end path: connection, successful project compilation, and APK download.
+The active build refreshes while the screen is open and the last run is remembered across app restarts. The owner has manually verified the end-to-end flow: connection, project compilation, and APK download.
 
 **Current build limit:** Android Gradle projects only. Linux and Windows remain disabled until their builders produce and verify real binaries.
 
-### Access and private target repositories
+#### Access to private build targets
 
-The personal access token is used by the app to call the GitHub Actions API on rakmahefa/build; it is not passed into the target build process. Public target repositories can be checked out with the workflow's default token. For private target repositories, configure a read-only BUILD_TARGET_TOKEN Actions secret in the Build Engine repository, with Contents: read access to the target.
+The Remote Build token calls the GitHub Actions API on rakmahefa/build; it is not passed to the target build process. Public target repositories can be checked out using the workflow's default token. For a private target repository, configure a read-only BUILD_TARGET_TOKEN Actions secret in the Build Engine repository with Contents: read access to the target.
 
-The app downloads the build-android Actions artifact and chooses the debug APK, which is signed with Android's debug key and intended for testing. A release APK is also produced by the workflow but may be unsigned.
+The downloaded debug APK is signed with Android's debug key and is intended for testing. The workflow also produces a release APK, which may be unsigned.
 
 ## Architecture and development direction
 
-The app is being kept deliberately small and separated by responsibility:
+Responsibilities remain intentionally separated:
 
-- **WorkspaceRepository:** scoped folder/file access and basic text-file operations.
-- **WorkspaceScreen:** file explorer and editor interface.
-- **GitHubBuildClient:** calls the GitHub Actions API and downloads the build artifact.
-- **GitHubTokenStore:** encrypts the GitHub token with an Android Keystore AES-GCM key.
-- **Build Engine:** builds the target project in GitHub Actions and supplies APKs, logs, and metadata.
+- **WorkspaceRepository / WorkspaceScreen:** scoped file access and basic text editing.
+- **GitRepositoryManager / GitRepositoryScreen:** JGit operations for repositories cloned into app-private storage.
+- **GitCredentialStore:** separately encrypted Git credentials using Android Keystore.
+- **GitHubBuildClient / GitHubTokenStore:** workflow requests, status, build artifacts, logs, and the separate Remote Build credential.
+- **Build Engine:** compiles the target project in GitHub Actions and supplies APKs, logs, and metadata.
 
-The next planned layers are Git status/branch/commit/sync for a selected workspace, then local AI assistance. They should be added without mixing project-file access into the build client or duplicating build logic already owned by the Build Engine.
+The next major feature is local AI assistance that can read and propose edits to selected project files with explicit user control. Editor improvements can follow actual usage rather than introducing premature complexity.
 
-See the architecture notes in docs/ARCHITECTURE.md for the component boundaries and flow.
+See docs/ARCHITECTURE.md for component boundaries and data flow.
 
 ## Continuous integration
 
-The **Android CI** workflow runs on pushes to main and agent, pull requests targeting main, and manual dispatches. It runs unit tests, compiles debug and release APKs, verifies that APK files exist, and uploads the APKs plus the build log. Missing APKs fail the workflow instead of being treated as success.
+The **Android CI** workflow runs on pushes to main and agent, pull requests targeting main, and manual dispatches. It runs unit tests, compiles debug and release APKs, verifies outputs, and uploads the APKs plus build log.
 
 ## Release builds
 
@@ -67,16 +87,16 @@ git tag v0.1.0
 git push origin v0.1.0
 ~~~
 
-The release includes an installable debug APK, a release APK, the build log, and SHA-256 checksums. Without signing secrets, the release APK is explicitly labelled **unsigned**; the debug APK is signed with Android's debug key and is intended for testing.
+The release includes a debug APK, a release APK, build log, and SHA-256 checksums. Without signing secrets, the release APK is explicitly labelled **unsigned**; the debug APK is signed with Android's debug key.
 
-For signed release APKs, configure all four repository Actions secrets:
+For a signed release APK, configure these repository Actions secrets:
 
 - ANDROID_KEYSTORE_BASE64: base64-encoded release keystore
 - ANDROID_KEYSTORE_PASSWORD
 - ANDROID_KEY_ALIAS
 - ANDROID_KEY_PASSWORD
 
-Never commit a keystore or signing passwords to the repository. Running the release workflow manually builds and uploads artifacts but only publishes a GitHub Release when the selected ref is a tag starting with v.
+Never commit a keystore or signing passwords. A manually triggered release workflow uploads artifacts but only publishes a GitHub Release when the selected ref is a version tag beginning with v.
 
 ## Build locally
 
@@ -91,8 +111,9 @@ The APKs are written to app/build/outputs/apk/debug/ and app/build/outputs/apk/r
 ## Technology
 
 - Kotlin and Jetpack Compose
-- Android Storage Access Framework and DocumentFile for scoped workspace access
-- Android Keystore for encrypted local credential storage
+- Android Storage Access Framework and DocumentFile
+- Eclipse JGit for in-app Git operations
+- Android Keystore for encrypted credential storage
 - GitHub Actions API and the remote Build Engine
 - Gradle
 - Cactus AI (planned local integration)
