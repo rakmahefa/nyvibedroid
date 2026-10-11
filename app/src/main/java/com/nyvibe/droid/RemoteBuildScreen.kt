@@ -93,6 +93,15 @@ internal fun RemoteBuildScreen() {
     var logText by remember { mutableStateOf<String?>(null) }
     var showLogs by remember { mutableStateOf(false) }
 
+    suspend fun cleanupWorkspaceUpload(activeToken: String, completedRunId: Long) {
+        val upload = workspaceUpload?.takeIf { it.runId == completedRunId } ?: return
+        withContext(Dispatchers.IO) {
+            GitHubBuildClient.deleteTemporaryWorkspaceUpload(activeToken, upload)
+        }
+        tokenStore.clearWorkspaceUpload()
+        workspaceUpload = null
+    }
+
     LaunchedEffect(Unit) {
         workspaceTarget = withContext(Dispatchers.IO) {
             GitRepositoryManager.currentWorkspaceBuildTarget(context)
@@ -159,15 +168,6 @@ internal fun RemoteBuildScreen() {
     fun showError(error: Throwable) {
         message = readableError(error)
         messageIsError = true
-    }
-
-    suspend fun cleanupWorkspaceUpload(activeToken: String, completedRunId: Long) {
-        val upload = workspaceUpload?.takeIf { it.runId == completedRunId } ?: return
-        withContext(Dispatchers.IO) {
-            GitHubBuildClient.deleteTemporaryWorkspaceUpload(activeToken, upload)
-        }
-        tokenStore.clearWorkspaceUpload()
-        workspaceUpload = null
     }
 
     fun refreshRun() {
