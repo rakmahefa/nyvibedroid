@@ -465,7 +465,11 @@ internal fun RemoteBuildScreen() {
                                 } else {
                                     repository = target.repository
                                     targetRef = target.ref
-                                    message = "Cible du workspace sélectionnée : " + target.repository + " · " + target.ref + "."
+                                    message = if (target.source == "Workspace") {
+                                        "Workspace sélectionné : " + target.repository + " · " + target.ref + "."
+                                    } else {
+                                        "Aucun workspace Git géré trouvé. Utilisation du dépôt Git actif : " + target.repository + " · " + target.ref + "."
+                                    }
                                     messageIsError = false
                                 }
                             } catch (error: Exception) {
@@ -480,7 +484,7 @@ internal fun RemoteBuildScreen() {
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Utiliser le workspace courant", color = Foreground)
+                    Text("Utiliser le workspace / dépôt Git actif", color = Foreground)
                 }
                 val selectedWorkspaceTarget = workspaceTarget?.takeIf {
                     repository.equals(it.repository, ignoreCase = true) && targetRef == it.ref
@@ -491,14 +495,18 @@ internal fun RemoteBuildScreen() {
                         if (hasUnsyncedCode) {
                             "Modifications locales ou commits non poussés détectés. Remote Build compile la copie GitHub : fais Commit puis Push dans Git avant de lancer le build pour inclure ces changements."
                         } else {
-                            "Workspace lié. Remote Build compile la branche distante sur GitHub ; les fichiers locaux non committés ne sont pas transférés."
+                            if (selectedWorkspaceTarget.source == "Workspace") {
+                            "Workspace Git lié. Remote Build compile la branche distante sur GitHub ; les fichiers locaux non committés ne sont pas transférés."
+                        } else {
+                            "Cible prise depuis le dépôt actif de l'onglet Git. Remote Build compile sa branche distante sur GitHub ; les changements locaux doivent être commités et poussés."
+                        }
                         },
                         color = if (hasUnsyncedCode) Danger else Muted,
                         fontSize = 12.sp
                     )
                 } else if (workspaceTarget == null) {
                     Text(
-                        "Le bouton Workspace fonctionne pour un dépôt cloné depuis l'onglet Git. Un dossier choisi directement via le sélecteur Android ne possède pas de cible GitHub automatique.",
+                        "Aucun dépôt Git compatible n'a été trouvé. Dans l'onglet Git, clone un dépôt GitHub ou sélectionne un dépôt déjà cloné, puis utilise « Définir comme Workspace actif ».",
                         color = Muted,
                         fontSize = 12.sp
                     )
