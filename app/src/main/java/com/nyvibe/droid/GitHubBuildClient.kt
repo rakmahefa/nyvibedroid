@@ -317,8 +317,8 @@ internal object GitHubBuildClient {
         }
     }
 
-    private fun requestJson(token: String, path: String, method: String): JSONObject {
-        val response = request(token, path, method)
+    private fun requestJson(token: String, path: String, method: String, body: String? = null): JSONObject {
+        val response = request(token, path, method, body)
         return if (response.isBlank()) JSONObject() else JSONObject(response)
     }
 
