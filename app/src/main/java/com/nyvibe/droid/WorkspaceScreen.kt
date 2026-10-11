@@ -87,6 +87,7 @@ internal fun WorkspaceScreen() {
     var showDiscardDialog by remember { mutableStateOf(false) }
     var newFileName by rememberSaveable { mutableStateOf("NewFile.kt") }
     var isSaving by remember { mutableStateOf(false) }
+    var isConverting by remember { mutableStateOf(false) }
 
     val folderPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -210,6 +211,37 @@ internal fun WorkspaceScreen() {
                 refreshCounter++
             } catch (error: Exception) {
                 createErrorMessage = readableWorkspaceError(error)
+            }
+        }
+    }
+
+    fun convertWorkspaceToManagedRepository() {
+        if (isConverting || rootUri == null) return
+        val sourceUri = rootUri.orEmpty()
+        scope.launch {
+            isConverting = true
+            errorMessage = null
+            infoMessage = "Préparation du dépôt local…"
+            try {
+                val repository = withContext(Dispatchers.IO) {
+                    GitRepositoryManager.makeWorkspaceManaged(context)
+                }
+                val managedUri = Uri.fromFile(java.io.File(repository.directory)).toString()
+                rootUri = managedUri
+                breadcrumbs = listOf(WorkspaceCrumb(managedUri, repository.name))
+                activeFile = null
+                items = emptyList()
+                refreshCounter++
+                infoMessage = if (Uri.parse(sourceUri).scheme == "content") {
+                    "Workspace importé dans le stockage privé et initialisé comme dépôt Git local. Le dossier d'origine n'a pas été modifié."
+                } else {
+                    "Workspace initialisé comme dépôt Git local : " + repository.name
+                }
+            } catch (error: Exception) {
+                errorMessage = readableWorkspaceError(error)
+                infoMessage = null
+            } finally {
+                isConverting = false
             }
         }
     }
