@@ -23,7 +23,8 @@ internal data class BuildRun(
 
 internal data class WorkspaceUploadRelease(
     val id: Long,
-    val tagName: String
+    val tagName: String,
+    val runId: Long? = null
 )
 
 internal object GitHubBuildClient {
