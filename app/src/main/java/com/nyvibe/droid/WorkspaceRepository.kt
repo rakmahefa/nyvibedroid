@@ -8,6 +8,8 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.util.Locale
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 internal data class WorkspaceItem(
     val uri: String,
@@ -187,6 +189,178 @@ internal object WorkspaceRepository {
                 it == "application/yaml" || it == "application/x-yaml" || it == "application/javascript"
         } ?: false
     }
+
+    /**
+     * Imports a SAF-selected workspace into app-private storage so JGit can manage its files.
+     * The original SAF folder is not modified; the caller should switch the active root to this copy.
+     */
+    fun importWorkspaceIntoManagedProject(context: Context, sourceUri: String): File {
+        val uri = Uri.parse(sourceUri)
+        if (uri.scheme == "file") {
+            val current = managedFile(context, uri.path.orEmpty())
+            if (!current.isDirectory) throw IOException("Le workspace actif n'est pas un dossier.")
+            return current
+        }
+        val source = treeDocument(context, sourceUri)
+        if (!source.isDirectory) throw IOException("Le workspace actif n'est pas un dossier.")
+        val name = source.name?.takeIf { it.isNotBlank() } ?: "workspace"
+        val safeName = name.lowercase(Locale.ROOT)
+            .replace(Regex("[^a-z0-9_.-]+"), "-")
+            .trim('-', '.', '_')
+            .take(60)
+            .ifBlank { "workspace" }
+        val projectsRoot = File(context.filesDir, PROJECTS_FOLDER).canonicalFile
+        val parent = File(projectsRoot, "workspaces")
+        if (!parent.exists() && !parent.mkdirs()) {
+            throw IOException("Impossible de créer l'espace privé des workspaces.")
+        }
+        val target = File(parent, safeName + "-" + System.currentTimeMillis()).canonicalFile
+        if (!target.path.startsWith(projectsRoot.path + File.separator)) {
+            throw IOException("Chemin du workspace importé non autorisé.")
+        }
+        if (!target.mkdirs()) throw IOException("Impossible de préparer la copie gérée du workspace.")
+        try {
+            copyDocumentTree(context, source, target, CopyStats())
+        } catch (error: Exception) {
+            target.deleteRecursively()
+            throw IOException("Import du workspace interrompu : " + (error.message ?: "erreur de copie"), error)
+        }
+        return target
+    }
+
+    /** Creates a ZIP of the active Workspace without Git metadata, common build caches, or local secret files. */
+    fun createWorkspaceArchive(context: Context, outputFile: File): File {
+        val savedRoot = loadRootUri(context) ?: throw IOException("Choisis un workspace avant de lancer le build.")
+        val uri = Uri.parse(savedRoot)
+        val parent = outputFile.parentFile ?: throw IOException("Chemin d'archive invalide.")
+        if (!parent.exists() && !parent.mkdirs()) throw IOException("Impossible de préparer l'archive temporaire.")
+        outputFile.delete()
+        try {
+            ZipOutputStream(outputFile.outputStream().buffered()).use { zip ->
+                val stats = CopyStats()
+                when (uri.scheme) {
+                    "file" -> {
+                        val root = managedFile(context, uri.path.orEmpty())
+                        if (!root.isDirectory) throw IOException("Le workspace actif n'est pas un dossier.")
+                        zipFileTree(root, root, "", zip, stats)
+                    }
+                    "content" -> {
+                        val root = treeDocument(context, savedRoot)
+                        if (!root.isDirectory) throw IOException("Le workspace actif n'est pas un dossier.")
+                        zipDocumentTree(context, root, "", zip, stats)
+                    }
+                    else -> throw IOException("Ce type de workspace ne peut pas être envoyé au Build Engine.")
+                }
+                if (stats.files == 0) throw IOException("Le workspace ne contient aucun fichier à compiler.")
+            }
+            if (!outputFile.isFile || outputFile.length() == 0L) throw IOException("L'archive du workspace est vide.")
+            if (outputFile.length() > MAX_WORKSPACE_ARCHIVE_ZIP_BYTES) {
+                throw IOException("L'archive compressée dépasse la limite de 200 Mio.")
+            }
+            return outputFile
+        } catch (error: Exception) {
+            outputFile.delete()
+            if (error is IOException) throw error
+            throw IOException("Création de l'archive impossible : " + (error.message ?: "erreur inconnue"), error)
+        }
+    }
+
+    private data class CopyStats(var files: Int = 0, var bytes: Long = 0)
+
+    private fun copyDocumentTree(context: Context, source: DocumentFile, destination: File, stats: CopyStats) {
+        for (item in source.listFiles()) {
+            val name = item.name ?: continue
+            if (!isSafeWorkspaceName(name) || shouldSkipWorkspaceEntry(name, item.isDirectory)) continue
+            val target = File(destination, name)
+            if (item.isDirectory) {
+                if (!target.exists() && !target.mkdirs()) throw IOException("Impossible de créer le dossier " + name + ".")
+                copyDocumentTree(context, item, target, stats)
+            } else {
+                if (target.exists()) throw IOException("Fichier dupliqué pendant l'import : " + name)
+                val input = context.contentResolver.openInputStream(item.uri)
+                    ?: throw IOException("Impossible de lire " + name + " depuis le workspace source.")
+                input.use { sourceStream ->
+                    target.outputStream().buffered().use { destinationStream ->
+                        copyBounded(sourceStream, destinationStream, stats)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun zipDocumentTree(context: Context, source: DocumentFile, prefix: String, zip: ZipOutputStream, stats: CopyStats) {
+        for (item in source.listFiles()) {
+            val name = item.name ?: continue
+            if (!isSafeWorkspaceName(name) || shouldSkipWorkspaceEntry(name, item.isDirectory)) continue
+            val relative = if (prefix.isEmpty()) name else prefix + "/" + name
+            if (item.isDirectory) {
+                zip.putNextEntry(ZipEntry(relative + "/"))
+                zip.closeEntry()
+                zipDocumentTree(context, item, relative, zip, stats)
+            } else {
+                zip.putNextEntry(ZipEntry(relative))
+                val input = context.contentResolver.openInputStream(item.uri)
+                    ?: throw IOException("Impossible de lire " + relative + " depuis le workspace.")
+                input.use { copyBounded(it, zip, stats) }
+                zip.closeEntry()
+            }
+        }
+    }
+
+    private fun zipFileTree(root: File, directory: File, prefix: String, zip: ZipOutputStream, stats: CopyStats) {
+        for (item in directory.listFiles().orEmpty()) {
+            if (!isSafeWorkspaceName(item.name) || shouldSkipWorkspaceEntry(item.name, item.isDirectory)) continue
+            val canonical = item.canonicalFile
+            val normalizedAbsolute = item.absoluteFile.toPath().normalize().toFile()
+            if (canonical.path != normalizedAbsolute.path) continue
+            if (canonical.path != root.canonicalPath && !canonical.path.startsWith(root.canonicalPath + File.separator)) continue
+            val relative = if (prefix.isEmpty()) item.name else prefix + "/" + item.name
+            if (item.isDirectory) {
+                zip.putNextEntry(ZipEntry(relative + "/"))
+                zip.closeEntry()
+                zipFileTree(root, item, relative, zip, stats)
+            } else if (item.isFile) {
+                zip.putNextEntry(ZipEntry(relative))
+                item.inputStream().buffered().use { copyBounded(it, zip, stats) }
+                zip.closeEntry()
+            }
+        }
+    }
+
+    private fun copyBounded(input: java.io.InputStream, output: java.io.OutputStream, stats: CopyStats) {
+        val buffer = ByteArray(32 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            stats.bytes += count
+            if (stats.bytes > MAX_WORKSPACE_SOURCE_BYTES) {
+                throw IOException("Le workspace dépasse la limite de 512 Mio de fichiers source.")
+            }
+            output.write(buffer, 0, count)
+        }
+        stats.files++
+        if (stats.files > MAX_WORKSPACE_FILE_COUNT) {
+            throw IOException("Le workspace contient plus de 100 000 fichiers.")
+        }
+    }
+
+    private fun shouldSkipWorkspaceEntry(name: String, isDirectory: Boolean): Boolean {
+        val normalized = name.lowercase(Locale.ROOT)
+        if (normalized == ".git" || normalized == ".gradle" || normalized == ".idea" ||
+            normalized == ".kotlin" || normalized == "node_modules" || normalized == ".ds_store" ||
+            (isDirectory && normalized == "build")) return true
+        if (normalized == "local.properties" || normalized == ".git-credentials") return true
+        if (normalized == ".env" || (normalized.startsWith(".env.") && !normalized.endsWith(".example"))) return true
+        return listOf(".jks", ".keystore", ".p12", ".pem", ".key").any { normalized.endsWith(it) }
+    }
+
+    private fun isSafeWorkspaceName(name: String): Boolean =
+        name.isNotBlank() && name != "." && name != ".." &&
+            name.none { it == '/' || it == '\\' || it.isISOControl() }
+
+    private const val MAX_WORKSPACE_SOURCE_BYTES = 512L * 1024L * 1024L
+    private const val MAX_WORKSPACE_ARCHIVE_ZIP_BYTES = 200L * 1024L * 1024L
+    private const val MAX_WORKSPACE_FILE_COUNT = 100_000
 
     private fun managedFile(context: Context, rawPath: String): File {
         val requested = File(rawPath).canonicalFile
