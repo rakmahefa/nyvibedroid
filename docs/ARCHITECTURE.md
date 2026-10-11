@@ -2,48 +2,59 @@
 
 ## Goals
 
-Keep local file access, editor state, GitHub Actions communication, and credential storage separated. The Build Engine is responsible for compiling projects; the app is responsible for selecting a workspace, requesting builds, showing results, and editing project text.
+Keep local file access, editor state, Git repository operations, GitHub Actions communication, and credential storage separated. Build Engine owns compilation. The app manages projects, version-control actions, the editor, and requests remote builds.
 
 ## Components
 
-- **Navigation:** small Jetpack Compose section switcher for Workspace and Remote Build.
-- **WorkspaceScreen:** folder browsing, file list, text editor, create/save/discard actions, and visible error states.
-- **WorkspaceRepository:** uses Android's Storage Access Framework and DocumentFile for operations inside a user-selected folder.
-- **GitHubBuildClient:** HTTPS calls to GitHub REST APIs; dispatches and polls the Remote Build Engine workflow in rakmahefa/build, discovers the build-android artifact, and reads build logs.
-- **GitHubTokenStore:** encrypts the fine-grained personal access token using an AES-GCM key from Android Keystore and stores only ciphertext and IV in app-private preferences.
-- **Build Engine (rakmahefa/build):** owns Gradle invocation, APK collection, build metadata, logs, and artifact publication.
-- **Planned Git layer:** repository status, branches, commits, and synchronization for a selected workspace.
-- **Planned AI layer:** local model integration and code assistance.
+- **Navigation:** Jetpack Compose sections for Workspace, Git, and Remote Build.
+- **WorkspaceScreen:** scoped folder browsing, file list, text editor, create/save/discard actions, and error states.
+- **WorkspaceRepository:** uses Android's Storage Access Framework for arbitrary user-selected folders, and a guarded file-backed path for repositories managed under app-private storage.
+- **GitRepositoryScreen:** repository clone/select controls, status, local branches, diff view, commit form, fetch/pull/push actions.
+- **GitRepositoryManager:** JGit operations for repositories stored below files/projects/. Restricts remote clone URLs to HTTPS on github.com and validates managed working-tree paths.
+- **GitCredentialStore:** AES-GCM encryption backed by Android Keystore for the Git credential, stored separately from the Remote Build token.
+- **GitHubBuildClient:** GitHub REST API calls to trigger and poll the Remote Build Engine workflow, discover the build-android artifact, download APKs and read logs.
+- **GitHubTokenStore:** independent AES-GCM storage for the Remote Build token.
+- **Build Engine (rakmahefa/build):** owns Gradle invocation, APK collection, metadata, logs, and artifact publication.
+- **Planned AI layer:** local model integration with explicit access to selected files.
 
 ## Workspace access and editor
 
-1. User chooses a folder using Android's system document-tree picker.
-2. App takes persistable read/write permission for that tree URI and remembers the URI in app-private preferences.
-3. File listing is performed only below the selected tree; directories are sorted before files.
+1. User may select an arbitrary folder with Android's document-tree picker; NyVibeDroid keeps the granted URI.
+2. For app-managed Git clones, the workspace root is a file URI created by the Git manager and checked to be inside files/projects/.
+3. File listing is limited to that root; the Git metadata directory (.git) is hidden from the editor.
 4. Recognized text files are opened as UTF-8 and edited in the text editor.
-5. Save writes the updated text to the original document. Unsaved changes can be discarded.
-6. Text editing and creating text files are limited to 1 MiB content and supported text extensions/MIME types. Unknown and binary formats are not opened by the editor.
+5. Save writes to the existing document and the Git status can then report the change.
+6. Text editing and creating text files are limited to 1 MiB and supported text extensions/MIME types. Unknown and binary formats are not opened.
 
-The initial editor deliberately does not copy projects into a private sandbox or crawl device storage. A later project-import or Git layer should preserve clear ownership of file paths and permissions.
+Git clones use private app storage rather than arbitrary SAF trees because JGit needs filesystem access to both the working files and .git metadata. The arbitrary-folder workspace is still useful for browsing and editing, but it is not treated as a Git working tree automatically.
+
+## Git flow
+
+1. User enters a GitHub repository as owner/repository or a GitHub HTTPS URL.
+2. Git manager validates the host and destination, then clones the repository under files/projects/owner/repository.
+3. User opens the managed clone in Workspace to edit files.
+4. JGit reports staged, unstaged, missing, deleted, untracked, and conflicting paths and supplies diff output.
+5. User may create/switch local branches and create a commit containing all current changes.
+6. Fetch, pull, and push use the remote URL and a separate encrypted Git token when required.
+
+The first implementation intentionally does not implement SSH, alternate Git hosts, interactive conflict resolution, rebase workflows, partial staging, or worktree management. Users should commit or back up important changes before performing a pull or switching branches.
 
 ## Remote build flow
 
 1. User supplies target repository (owner/name) and branch/tag/commit.
-2. App validates the token and sends workflow_dispatch to rakmahefa/build with the Android platform input.
-3. App identifies the new run, records its ID, and queries GitHub Actions for the status.
-4. On completion, app discovers the build-android artifact.
+2. App validates the Remote Build token and dispatches workflow_dispatch to rakmahefa/build.
+3. App locates the new run, records its ID, and polls GitHub Actions.
+4. When the run completes, the app discovers the build-android artifact.
 5. User opens bounded log excerpts or downloads the debug APK to Downloads.
 
-The personal access token is used only for the GitHub API. It is not forwarded to the target build. Private target repositories require a separate read-only BUILD_TARGET_TOKEN Actions secret configured in the Build Engine repository.
+The Remote Build token is only for the GitHub Actions API and is not forwarded to the target build process. Private build targets require a separate read-only BUILD_TARGET_TOKEN Actions secret in the Build Engine repository.
 
 ## Development sequence
 
-1. Local workspace selection, explorer, and basic text editing.
-2. Git integration for the selected workspace: status, branches, diff, commit, fetch/pull/push.
-3. Local AI assistance that can operate on selected files with explicit user control.
-4. Improve editor ergonomics: tabs, search, undo/redo, and syntax highlighting as justified by use.
-
-Remote builds remain an independent capability available through the existing Build Engine interface.
+1. Workspace selection, explorer, and basic text editing.
+2. Git clone/status/diff/branch/commit/fetch/pull/push for app-managed clones.
+3. Local AI assistance that can read selected files and propose changes under explicit user control.
+4. Improve editor ergonomics (tabs, search, undo/redo, syntax highlighting) according to actual needs.
 
 ## Supported build targets
 
