@@ -84,6 +84,8 @@ internal fun WorkspaceScreen() {
     var editorText by remember { mutableStateOf("") }
     var originalText by remember { mutableStateOf("") }
     var createDialogOpen by remember { mutableStateOf(false) }
+    var createErrorMessage by remember { mutableStateOf<String?>(null) }
+    var showDiscardDialog by remember { mutableStateOf(false) }
     var newFileName by rememberSaveable { mutableStateOf("NewFile.kt") }
     var isSaving by remember { mutableStateOf(false) }
 
@@ -204,10 +206,11 @@ internal fun WorkspaceScreen() {
                 originalText = ""
                 activeFile = created
                 infoMessage = "Nouveau fichier : ${created.name}"
+                createErrorMessage = null
                 errorMessage = null
                 refreshCounter++
             } catch (error: Exception) {
-                errorMessage = readableWorkspaceError(error)
+                createErrorMessage = readableWorkspaceError(error)
             }
         }
     }
@@ -276,7 +279,7 @@ internal fun WorkspaceScreen() {
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("CONTENU", color = WorkspaceText, fontWeight = FontWeight.Bold, fontSize = 12.sp, letterSpacing = 1.2.sp, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { newFileName = "NewFile.kt"; createDialogOpen = true }, enabled = !isLoading) {
+                    TextButton(onClick = { newFileName = "NewFile.kt"; createErrorMessage = null; createDialogOpen = true }, enabled = !isLoading) {
                         Text("+ Nouveau fichier", color = WorkspaceAccent, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -302,7 +305,10 @@ internal fun WorkspaceScreen() {
         } else {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
-                    onClick = { activeFile = null; infoMessage = null; errorMessage = null },
+                    onClick = {
+                        if (editorText != originalText) showDiscardDialog = true
+                        else { activeFile = null; infoMessage = null; errorMessage = null }
+                    },
                     shape = RoundedCornerShape(11.dp)
                 ) { Text("← Fichiers", color = WorkspaceText) }
                 Text(
@@ -377,11 +383,12 @@ internal fun WorkspaceScreen() {
 
     if (createDialogOpen) {
         AlertDialog(
-            onDismissRequest = { createDialogOpen = false },
+            onDismissRequest = { createDialogOpen = false; createErrorMessage = null },
             title = { Text("Créer un fichier", color = WorkspaceText) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Le fichier sera créé dans le dossier affiché.", color = WorkspaceMuted, fontSize = 13.sp)
+                    if (createErrorMessage != null) Text(createErrorMessage.orEmpty(), color = WorkspaceError, fontSize = 12.sp)
                     OutlinedTextField(
                         value = newFileName, onValueChange = { newFileName = it },
                         singleLine = true, label = { Text("Nom du fichier") },
@@ -393,7 +400,28 @@ internal fun WorkspaceScreen() {
                 TextButton(onClick = { createCurrentFile() }) { Text("Créer", color = WorkspaceAccent, fontWeight = FontWeight.Bold) }
             },
             dismissButton = {
-                TextButton(onClick = { createDialogOpen = false }) { Text("Annuler", color = WorkspaceMuted) }
+                TextButton(onClick = { createDialogOpen = false; createErrorMessage = null }) { Text("Annuler", color = WorkspaceMuted) }
+            },
+            containerColor = WorkspacePanel
+        )
+    }
+
+    if (showDiscardDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            title = { Text("Abandonner les modifications ?", color = WorkspaceText) },
+            text = { Text("Les changements non enregistrés seront perdus.", color = WorkspaceMuted) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDiscardDialog = false
+                    editorText = originalText
+                    activeFile = null
+                    infoMessage = null
+                    errorMessage = null
+                }) { Text("Abandonner", color = WorkspaceError, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardDialog = false }) { Text("Continuer l\u0027édition", color = WorkspaceAccent) }
             },
             containerColor = WorkspacePanel
         )
