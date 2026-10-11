@@ -164,6 +164,45 @@ internal object GitRepositoryManager {
         }
     }
 
+    /**
+     * Converts the active Workspace into an app-managed local Git repository.
+     * SAF workspaces are copied to private storage because JGit needs filesystem access.
+     */
+    fun makeWorkspaceManaged(context: Context): LocalGitRepository {
+        val savedRoot = WorkspaceRepository.loadRootUri(context)
+            ?: throw IOException("Choisis un dossier dans Workspace avant de le transformer.")
+        val uri = Uri.parse(savedRoot)
+        val root = when (uri.scheme) {
+            "file" -> {
+                val candidate = File(uri.path.orEmpty()).canonicalFile
+                val projectsRoot = projectsDirectory(context)
+                if (!candidate.path.startsWith(projectsRoot.path + File.separator) || !candidate.isDirectory) {
+                    throw IOException("Ce Workspace n'est pas dans l'espace privé géré. Sélectionne un dossier puis importe-le comme projet géré.")
+                }
+                candidate
+            }
+            "content" -> WorkspaceRepository.importWorkspaceIntoManagedProject(context, savedRoot).canonicalFile
+            else -> throw IOException("Ce type de Workspace ne peut pas être converti en dépôt géré.")
+        }
+        val projectsRoot = projectsDirectory(context)
+        if (!root.path.startsWith(projectsRoot.path + File.separator)) {
+            throw IOException("Le dossier cible n'est pas autorisé comme dépôt géré.")
+        }
+
+        if (File(root, ".git").isDirectory) {
+            openRepository(root).use { }
+        } else {
+            try {
+                Git.init().setDirectory(root).call().use { }
+            } catch (error: Exception) {
+                throw IOException("Impossible d'initialiser le dépôt Git local : " + gitError(error), error)
+            }
+        }
+        selectRepository(context, root.path)
+        WorkspaceRepository.saveRootUri(context, Uri.fromFile(root))
+        return describe(root)
+    }
+
     fun selectRepository(context: Context, directory: String) {
         val repo = managedRepository(context, directory)
         openRepository(repo).use { }
