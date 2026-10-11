@@ -1,0 +1,70 @@
+name: Android CI
+
+on:
+  push:
+    branches:
+      - main
+      - agent
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify Android app
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Lint GitHub Actions workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="1.7.12"
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${version}/actionlint_${version}_linux_amd64.tar.gz" -o "$archive"
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" .github/workflows/*.yml
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "8.9"
+
+      - name: Run tests and build APKs
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon clean test assembleDebug assembleRelease 2>&1 | tee build.log
+
+      - name: Verify APK outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          test -n "$(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          find app/build/outputs/apk -maxdepth 2 -type f -name '*.apk' -print
+
+      - name: Upload APKs and build log
+        uses: actions/upload-artifact@v7
+        with:
+          name: nyvibedroid-apks-${{ github.sha }}
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk
+            build.log
+          if-no-files-found: error
+          retention-days: 14
