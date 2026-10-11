@@ -162,7 +162,12 @@ internal object GitRepositoryManager {
 
             val branches = git.branchList().call().map { Repository.shortenRefName(it.name) }.distinct().sorted()
             val repository = git.repository
-            val tracking = repository.config.getBranchConfig(repository.branch).trackingBranch
+            val branch = repository.branch.orEmpty()
+            val remoteName = repository.config.getString("branch", branch, "remote")
+            val mergeRef = repository.config.getString("branch", branch, "merge")
+            val tracking = if (!remoteName.isNullOrBlank() && !mergeRef.isNullOrBlank()) {
+                "refs/remotes/" + remoteName + "/" + Repository.shortenRefName(mergeRef)
+            } else null
             val aheadBehind = if (!tracking.isNullOrBlank() && repository.resolve(tracking) != null) {
                 runCatching { countAheadBehind(repository, tracking) }.getOrDefault(0 to 0)
             } else 0 to 0
