@@ -323,7 +323,8 @@ internal object ChatGptPlanClient {
     }
 
     private fun receiveCallback(listener: ServerSocket, redirectUri: String): Uri {
-        while (true) {
+        var callback: Uri? = null
+        for (attempt in 0 until 5) {
             val socket = listener.accept()
             socket.soTimeout = 10_000
             try {
@@ -334,22 +335,24 @@ internal object ChatGptPlanClient {
                     if (header.isEmpty()) break
                 }
                 val path = requestLine.split(" ").getOrNull(1).orEmpty()
-                if (path.substringBefore("?") != CALLBACK_PATH) {
+                if (path.substringBefore("?") == CALLBACK_PATH) {
+                    writeBrowserResponse(
+                        socket,
+                        200,
+                        "OK",
+                        "ChatGPT a répondu. Tu peux revenir dans NyVibeDroid."
+                    )
+                    val origin = redirectUri.substringBefore(CALLBACK_PATH)
+                    callback = Uri.parse(origin + path)
+                } else {
                     writeBrowserResponse(socket, 404, "Not found", "Not found")
-                    continue
                 }
-                writeBrowserResponse(
-                    socket,
-                    200,
-                    "OK",
-                    "ChatGPT a répondu. Tu peux revenir dans NyVibeDroid."
-                )
-                val origin = redirectUri.substringBefore(CALLBACK_PATH)
-                return Uri.parse(origin + path)
             } finally {
                 socket.close()
             }
+            if (callback != null) break
         }
+        return callback ?: throw IOException("La redirection OAuth locale est invalide. Réessaie la connexion.")
     }
 
     private fun writeBrowserResponse(socket: Socket, status: Int, reason: String, message: String) {
