@@ -22,6 +22,8 @@ internal interface AiProvider {
 
     suspend fun listModels(context: Context): List<AiModel>
 
+    suspend fun disconnect(context: Context): Boolean
+
     suspend fun proposeFileRevision(
         context: Context,
         fileName: String,
@@ -37,6 +39,9 @@ internal object ChatGptCloudProvider : AiProvider {
 
     override suspend fun listModels(context: Context): List<AiModel> =
         ChatGptPlanClient.listModels(context)
+
+    override suspend fun disconnect(context: Context): Boolean =
+        ChatGptPlanClient.disconnect(context)
 
     override suspend fun proposeFileRevision(
         context: Context,
