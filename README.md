@@ -4,7 +4,7 @@
 
 NyVibeDroid is an Android development workspace built around local project files, code editing, Git version control, and remote Android builds.
 
-> **Status:** The app includes a local workspace/file explorer and basic text editor, a Git repository manager powered by JGit, and a remote-build dashboard backed by the companion Build Engine. Local AI assistance is not implemented yet.
+> **Status:** The app includes a local workspace/file explorer and basic text editor, a Git repository manager powered by JGit, a remote Android build dashboard, and an initial ChatGPT Cloud assistant. The assistant proposes changes to the currently open file; changes are reviewed before they enter the editor and saved to disk only after an explicit Save action. A local-model provider and project-wide GitHub tools remain future work.
 
 ## What works today
 
@@ -17,6 +17,19 @@ NyVibeDroid is an Android development workspace built around local project files
 - Open a repository cloned or imported through the Git section in the same Workspace editor.
 
 This is a lightweight first editor, not yet a full IDE. Syntax highlighting, tabs, search, undo/redo, and project-wide indexing remain future improvements.
+
+### AI assistant (initial single-file workflow)
+
+From an open text file, tap **✦ IA** to use the ChatGPT Cloud provider. Connect with **Continue with ChatGPT** and authorize ChatGPT plan usage in the browser. The open-source Sign in with ChatGPT flow uses OAuth/PKCE and does not require an OpenAI API key. Availability depends on the account and the explicit plan-usage consent.
+
+- The model list is loaded for the connected account, and the user chooses a model.
+- The assistant receives only the open file's current editor content and the written instruction, not the full workspace.
+- The first version accepts files up to 64 KiB and 1,800 lines for AI requests.
+- The answer is treated as a proposed full-file replacement and displayed as an added/removed-line preview. **Accept** inserts the proposal into the in-memory editor; **Refuse** leaves it unchanged. Saving to disk remains a separate, explicit action.
+- OAuth credentials are encrypted with Android Keystore; access tokens are renewed when needed. Responses requests use streaming and `store: false`.
+- The model provider is behind a small `AiProvider` interface. A local-model provider has not yet been implemented. Temporary GitHub repositories and project-wide tools are a separate follow-up; this version does not give ChatGPT general access to the user's GitHub account or the rest of the project.
+
+The current ChatGPT plan-sharing integration uses the Responses API and the models made available to the connected account. It does not expose ChatGPT conversation history or automatically transfer the tools enabled in the ChatGPT website/app.
 
 ### Git repository management
 
