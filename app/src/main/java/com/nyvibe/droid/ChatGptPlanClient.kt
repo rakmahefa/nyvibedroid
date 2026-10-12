@@ -223,6 +223,7 @@ internal object ChatGptPlanClient {
                         .put("content", input)
                 )
             )
+            .put("text", JSONObject().put("format", JSONObject().put("type", "json_object")))
             .put("store", false)
             .put("stream", true)
         val raw = streamResponse(credentials.accessToken, payload)
@@ -432,6 +433,7 @@ internal object ChatGptPlanClient {
                 throw IOException("La requête ChatGPT a échoué (HTTP $status) : " + apiMessage(detail))
             }
             val output = StringBuilder()
+            var completed = false
             connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                 while (true) {
                     val line = reader.readLine() ?: break
@@ -442,17 +444,40 @@ internal object ChatGptPlanClient {
                     when (event.optString("type")) {
                         "response.output_text.delta" -> output.append(event.optString("delta"))
                         "response.failed", "error" -> {
-                            val message = event.optJSONObject("response")
-                                ?.optJSONObject("error")?.optString("message")
-                                ?: event.optJSONObject("error")?.optString("message")
+                            val response = event.optJSONObject("response")
+                            val error = response?.optJSONObject("error") ?: event.optJSONObject("error")
+                            val code = error?.optString("code").orEmpty()
+                            val message = error?.optString("message")
                                 ?: "La génération a échoué."
-                            throw IOException(message.take(500))
+                            val hint = when (code) {
+                                "subscription_sharing_usage_limit_exceeded",
+                                "subscription_sharing_usage_unavailable" ->
+                                    " Vérifie les limites de ton forfait ChatGPT ou autorise à nouveau son utilisation."
+                                else -> ""
+                            }
+                            throw IOException((message + hint).take(600))
                         }
-                        "response.completed" -> if (output.isEmpty()) {
-                            output.append(extractCompletedText(event.optJSONObject("response")))
+                        "response.incomplete" -> {
+                            val details = event.optJSONObject("response")
+                                ?.optJSONObject("incomplete_details")
+                                ?.optString("reason")
+                                .orEmpty()
+                            throw IOException(
+                                "La réponse ChatGPT est incomplète" +
+                                    if (details.isBlank()) "." else " ($details)."
+                            )
+                        }
+                        "response.completed" -> {
+                            completed = true
+                            if (output.isEmpty()) {
+                                output.append(extractCompletedText(event.optJSONObject("response")))
+                            }
                         }
                     }
                 }
+            }
+            if (!completed) {
+                throw IOException("Le flux ChatGPT s'est terminé sans événement response.completed. Aucune modification n'a été proposée.")
             }
             if (output.isEmpty()) throw IOException("ChatGPT n'a retourné aucun texte. Aucune modification n'a été appliquée.")
             return output.toString()
