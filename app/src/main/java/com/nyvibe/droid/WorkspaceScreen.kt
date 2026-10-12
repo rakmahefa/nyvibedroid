@@ -88,6 +88,7 @@ internal fun WorkspaceScreen() {
     var newFileName by rememberSaveable { mutableStateOf("NewFile.kt") }
     var isSaving by remember { mutableStateOf(false) }
     var isConverting by remember { mutableStateOf(false) }
+    var aiAssistantOpen by remember { mutableStateOf(false) }
 
     val folderPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -363,6 +364,18 @@ internal fun WorkspaceScreen() {
                     EmptyWorkspaceMessage()
                 }
             }
+        } else if (aiAssistantOpen && activeFile != null) {
+            AiAssistantScreen(
+                fileName = activeFile!!.name,
+                currentContent = editorText,
+                onApplyProposal = { proposedContent ->
+                    editorText = proposedContent
+                    aiAssistantOpen = false
+                    infoMessage = "Proposition acceptée dans l'éditeur. Enregistre pour écrire le fichier sur disque."
+                    errorMessage = null
+                },
+                onClose = { aiAssistantOpen = false }
+            )
         } else {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
@@ -382,6 +395,9 @@ internal fun WorkspaceScreen() {
                 Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(activeFile!!.name, color = WorkspaceText, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        TextButton(onClick = { aiAssistantOpen = true }, enabled = !isSaving) {
+                            Text("✦ IA", color = WorkspaceAccent, fontWeight = FontWeight.Bold)
+                        }
                         Text("${editorText.toByteArray(Charsets.UTF_8).size / 1024} KiB", color = WorkspaceMuted, fontSize = 11.sp)
                     }
                     Divider(color = WorkspaceBorder, modifier = Modifier.padding(vertical = 9.dp))
