@@ -290,7 +290,7 @@ internal object ChatGptPlanClient {
             expiresAtEpochSeconds = epochSecondsNow() + token.optLong("expires_in", 3600L).coerceAtLeast(60L)
         )
         store.save(renewed)
-        renewed
+        return renewed
     }
 
     private fun buildAuthorizationUri(
